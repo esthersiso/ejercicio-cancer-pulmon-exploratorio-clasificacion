@@ -1,0 +1,2235 @@
+---
+title: "Programa de ejercicio en cáncer de pulmón metastásico"
+author: "Esther"
+date: "`r format(Sys.Date(), '%d de %B de %Y')`"
+output:
+  html_document:
+    self_contained: false
+    theme: flatly
+    highlight: tango
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 3
+    code_folding: hide
+    number_sections: true
+    df_print: paged
+  word_document:
+    toc: true
+    toc_depth: '3'
+subtitle: Análisis Descriptivo, Comparativo y Predictivo
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width  = 10,
+  fig.height = 6
+)
+```
+
+```{r librerias}
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(plotly)
+library(knitr)
+library(kableExtra)
+library(DT)
+library(scales)
+library(forcats)
+library(stringr)
+library(glmnet)
+library(e1071)
+library(pROC)
+library(randomForest)
+```
+
+```{r carga-datos}
+ruta_excel <- "C:/Users/esiro/OneDrive - Universidad Carlos III de Madrid/4º curso/TFG/1 programa.xlsx"
+
+datos_raw <- read_excel(ruta_excel, sheet = "Congreso")
+
+datos <- datos_raw %>%
+  mutate(across(13:ncol(.), ~ suppressWarnings(as.numeric(gsub(",", ".", as.character(.)))))) %>%
+  mutate(
+    Sexo_label    = factor(sexo_participante, levels = c(1,2), labels = c("Hombre","Mujer")),
+    Grupo_label   = factor(grupo,             levels = c(1,2), labels = c("Fuerza","Aeróbico")),
+    Cancer_label  = factor(tipo),
+    Estadio_label = factor(estadio)
+  )
+
+#Función: moda
+moda <- function(x) { ux <- na.omit(unique(x)); ux[which.max(tabulate(match(x, ux)))] }
+
+all_vars_names <- names(datos)
+variables_t0   <- all_vars_names[paste0(all_vars_names, "_t1") %in% all_vars_names]
+```
+
+```{r etiquetas}
+#Etiquetas por dominio
+etiq_hemato <- c(
+  hb_hemato                    = "Hemoglobina (Hemograma)",
+  plaquetas_hemato             = "Plaquetas (Hemograma)",
+  leucos_hemato                = "Leucocitos totales (Hemograma)",
+  neutrofilos_hemato           = "Neutrófilos (Hemograma)",
+  linfocitos_hemato            = "Linfocitos totales (Hemograma)",
+  monocitos_hemato             = "Monocitos (Hemograma)",
+  porcenhg_neutrofilos_hemato  = "Neutrófilos % (Hemograma)",
+  porcenhg_linfos_hemato       = "Linfocitos % (Hemograma)",
+  porcenhg_monos_hemato        = "Monocitos % (Hemograma)",
+  linfocitostot_hemato         = "Linfocitos totales % (Citometría)",
+  pocen_monocitos_hemato       = "Monocitos % (Citometría)",
+  linfocitosb_hemato           = "Linfocitos B % (Citometría)",
+  linfocitost_hemato           = "Linfocitos T % (Citometría)",
+  linfocitostcd4_hemato        = "Linfocitos T CD4+ % (Citometría)",
+  linfocitostcd8_hemato        = "Linfocitos T CD8+ % (Citometría)",
+  nktotales_hemato             = "NK Totales % (Citometría)",
+  nkbright_hemato              = "NK Bright % (Citometría)",
+  nkdim_hemato                 = "NK Dim % (Citometría)",
+  linfocitosnkt_hemato         = "Linfocitos NKT % (Citometría)"
+)
+
+etiq_bio <- c(
+  glucosa_bio          = "Glucosa",
+  creatinina_bio       = "Creatinina",
+  proteinastotales_bio = "Proteínas totales",
+  albumina_bio         = "Albúmina",
+  bilirrubina_bio      = "Bilirrubina",
+  ast_bio              = "AST",
+  alt_bio              = "ALT",
+  ldh_bio              = "LDH",
+  ggt_bio              = "GGT",
+  calcio_bio           = "Calcio",
+  fosforo_bio          = "Fósforo",
+  magnesio_bio         = "Magnesio",
+  sodio_bio            = "Sodio",
+  potasio_bio          = "Potasio",
+  ck_bio               = "CK",
+  pcr_bio              = "PCR",
+  il6_bio              = "IL-6",
+  tsh_bio              = "TSH"
+)
+
+etiq_qol <- c(
+  estadosalud_qol          = "Estado de Salud Global",
+  total_areafunc_qol       = "Área Funcional",
+  total_funcionfisica_qol  = "Función Física",
+  total_actcotidianas_qol  = "Actividades Cotidianas",
+  total_emocional_qol      = "Función Emocional",
+  total_cognitiva_qol      = "Función Cognitiva",
+  total_social_qol         = "Función Social",
+  total_sintomas_qol       = "Escala de Síntomas"
+)
+
+etiq_lc29 <- c(
+  puntuaciontos_lc29              = "Tos",
+  puntuaciondisnea_lc29           = "Disnea",
+  puntuacionpelo_lc29             = "Pérdida de pelo",
+  puntuacionprogresion_lc29       = "Miedo a progresión",
+  puntuacioncirugia_lc29          = "Problemas cicatriz cirugía",
+  puntuacionsangretos_lc29        = "Sangrado/tos",
+  puntuacionbocalengua_lc29       = "Problemas boca/lengua",
+  puntuaciontragar_lc29           = "Dificultad para tragar",
+  puntuacionhormigueos_lc29       = "Hormigueos",
+  puntuaciondolorpecho_lc29       = "Dolor de pecho",
+  puntuaciondolorbrazohombro_lc29 = "Dolor brazo/hombro",
+  puntuaciondolorotraspartes_lc29 = "Dolor otras partes",
+  puntuacionalergicas_lc29        = "Reacciones alérgicas",
+  puntuacionojos_lc29             = "Problemas de ojos",
+  puntuacionmareos_lc29           = "Mareos",
+  `puntuacionu_as_lc29`           = "Problemas uñas",
+  puntuacionpiel_lc29             = "Problemas de piel",
+  puntuacionhabla_lc29            = "Problemas para hablar",
+  puntuacioncapfisicas_lc29       = "Cap. físicas limitadas",
+  puntuacionpeso_lc29             = "Preocupación por el peso",
+  puntuacion_sincirg_lc29         = "Puntuación sin cirugía"
+)
+
+etiq_hads <- c(
+  puntuacionansieda_hads   = "Ansiedad",
+  puntuaciondepresion_hads = "Depresión"
+)
+
+etiq_nutri <- c(
+  peso_nutri              = "Peso",
+  altura_nutri            = "Altura",
+  imc_nutri               = "IMC",
+  circunbrazo_nutri       = "Circunferencia del brazo",
+  plieguetricipital_nutri = "Pliegue tricipital",
+  circunpantorrilla_nutri = "Circunferencia de la pantorrilla"
+)
+
+etiq_confis <- c(
+  piestandem_confis           = "Equilibrio tándem",
+  mejortiempo_vmarcha4_confis = "Velocidad marcha 4m",
+  t_5rsts_confis              = "5 Chair Stand",
+  puntuacionfinal_sppb_confis = "SPPB",
+  mejortiempo_tug_confis      = "TUG",
+  media_dcha_dinamo_confis    = "Dinamometría Dcha. media",
+  max_dcha_dinamo_confis      = "Dinamometría Dcha. máx.",
+  media_izq_dinamo_confis     = "Dinamometría Izq. media",
+  max_izq_dinamo_confis       = "Dinamometría Izq. máx.",
+  fcbasal_6mwt_confis         = "FC basal 6MWT",
+  disneabasal_6mwt_confis     = "Disnea basal 6MWT",
+  fatigabasal_6mwt_confis     = "Fatiga basal 6MWT",
+  spo2basal_6mwt_confis       = "SpO2 basal 6MWT",
+  fcfin_6mwt_confis           = "FC final 6MWT",
+  disneafin_6mwt_confis       = "Disnea final 6MWT",
+  fatigafin_6mwt_confis       = "Fatiga final 6MWT",
+  spo2fin_6mwt_confis         = "SpO2 final 6MWT",
+  disttotal_6mwt_confis       = "Distancia 6MWT"
+)
+
+all_labels <- c(etiq_hemato, etiq_bio, etiq_qol, etiq_lc29,
+                etiq_hads, etiq_nutri, etiq_confis)
+
+dominio_var <- c(
+  setNames(rep("Hematología",    length(etiq_hemato)), names(etiq_hemato)),
+  setNames(rep("Bioquímica",     length(etiq_bio)),    names(etiq_bio)),
+  setNames(rep("QLQ-C30",        length(etiq_qol)),    names(etiq_qol)),
+  setNames(rep("LC-29",          length(etiq_lc29)),   names(etiq_lc29)),
+  setNames(rep("HADS",           length(etiq_hads)),   names(etiq_hads)),
+  setNames(rep("Nutrición",      length(etiq_nutri)),  names(etiq_nutri)),
+  setNames(rep("Función Física", length(etiq_confis)), names(etiq_confis))
+)
+
+all_vars_dom <- names(all_labels)
+```
+
+***
+
+# PARTE I: Análisis descriptivo y comparativo T0 – T1
+
+***
+
+## Descripción de la muestra
+
+```{r tabla-descriptivos}
+n_total <- nrow(datos)
+
+# Función variables continuas (media, desviación típica, rango)
+f_cont <- function(nombre, var) {
+  data.frame(
+    Variable           = nombre,
+    n                  = as.character(sum(!is.na(var))),
+    Media              = sprintf("%.1f", mean(var, na.rm=TRUE)),
+    `Desviación típica`= sprintf("%.1f", sd(var, na.rm=TRUE)),
+    Rango              = sprintf("%.0f – %.0f", min(var, na.rm=TRUE), max(var, na.rm=TRUE)),
+    check.names = FALSE, stringsAsFactors = FALSE
+  )
+}
+
+# Función variables categóricas (n, %)
+f_cat <- function(nombre, cond) {
+  nc <- sum(cond, na.rm=TRUE)
+  data.frame(
+    Variable         = nombre,
+    n                = as.character(nc),
+    `Porcentaje (%)` = sprintf("%.1f", 100 * nc / n_total),
+    check.names = FALSE, stringsAsFactors = FALSE
+  )
+}
+
+# Función encabezado de sección categórica
+f_sec <- function(nombre) {
+  data.frame(
+    Variable = nombre, n = "", `Porcentaje (%)` = "",
+    check.names = FALSE, stringsAsFactors = FALSE
+  )
+}
+
+# Variables continuas
+tabla_cont <- bind_rows(
+  f_cont("Edad (años)",                datos$edad_participante),
+  f_cont("Adherencia al programa (%)", datos$adh_infprograma1)
+)
+
+tabla_cont %>%
+  kable(
+    caption   = "Tabla 1a. Variables continuas (N = 22)",
+    align     = c("l","c","c","c","c"),
+    col.names = c("Variable", "n", "Media", "Desviación típica", "Rango")
+  ) %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE)
+
+# Variables categóricas
+tabla_cat <- bind_rows(
+  f_sec("Sexo"),
+  f_cat("   Hombre",              datos$Sexo_label == "Hombre"),
+  f_cat("   Mujer",               datos$Sexo_label == "Mujer"),
+  f_sec("Tipo tumoral"),
+  f_cat("   No metastásico (NM)", datos$Cancer_label == "NM"),
+  f_cat("   Metastásico (M)",     datos$Cancer_label == "M"),
+  f_sec("Estadio tumoral"),
+  f_cat("   Estadio IVB",         datos$Estadio_label == "Estadio IVB"),
+  f_cat("   Estadio IIIC",        datos$Estadio_label == "Estadio IIIC"),
+  f_cat("   Estadio IVA",         datos$Estadio_label == "Estadio IVA"),
+  f_cat("   Estadio IIIA",        datos$Estadio_label == "Estadio IIIA"),
+  f_cat("   Estadio IIIB",        datos$Estadio_label == "Estadio IIIB"),
+  f_sec("Grupo de entrenamiento"),
+  f_cat("   Fuerza",              datos$Grupo_label == "Fuerza"),
+  f_cat("   Aeróbico",            datos$Grupo_label == "Aeróbico")
+)
+
+filas_sec <- which(tabla_cat$Variable %in%
+                     c("Sexo", "Tipo tumoral", "Estadio tumoral",
+                       "Grupo de entrenamiento"))
+
+tabla_cat %>%
+  kable(
+    caption   = "Tabla 1b. Variables categóricas (N = 22)",
+    align     = c("l","c","c"),
+    col.names = c("Variable", "n", "Porcentaje (%)")
+  ) %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE) %>%
+  row_spec(0, bold = TRUE) %>%
+  row_spec(filas_sec, bold = TRUE)
+```
+
+
+### Distribuciones basales {.tabset}
+
+#### Edad y adherencia
+
+```{r fig-edad-adh, fig.height=5, fig.width=10}
+data.frame(
+  valor    = c(datos$edad_participante, datos$adh_infprograma1),
+  variable = rep(c("Edad (años)", "Adherencia (%)"),
+                 each = nrow(datos))
+) %>%
+  filter(!is.na(valor)) %>%
+  group_by(variable) %>%
+  mutate(media = mean(valor, na.rm=TRUE)) %>%
+  ungroup() %>%
+  ggplot(aes(x = valor, fill = variable)) +
+  geom_histogram(binwidth = 5, color = "white", alpha = 0.85) +
+  geom_vline(aes(xintercept = media),
+             linetype = "dashed", color = "#E74C3C", linewidth = 0.8) +
+  facet_wrap(~ variable, scales = "free_x") +
+  scale_fill_manual(values = c("Edad (años)" = "#2980B9",
+                               "Adherencia (%)" = "#27AE60")) +
+  labs(x = NULL, y = "Frecuencia",
+       title = "Distribución de variables basales continuas") +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "none",
+        strip.text = element_text(face = "bold", size = 12))
+```
+
+
+#### Sexo, tipo y estadio
+
+```{r fig-sexo-cancer, fig.height=5}
+p3 <- ggplot(datos %>% count(Sexo_label), aes(x = Sexo_label, y = n, fill = Sexo_label)) +
+  geom_col(width = 0.55, alpha = 0.88) +
+  geom_text(aes(label = paste0(n, "\n(", round(100*n/22,1),"%)"), y = n + 0.2), vjust = 0, size = 3.5) +
+  scale_fill_manual(values = c("Hombre" = "#2E86C1","Mujer" = "#E74C3C")) +
+  labs(title = "Sexo", x = NULL, y = "N") +
+  theme_minimal(base_size = 12) + theme(legend.position = "none")
+
+p4 <- ggplot(datos %>% count(Cancer_label), aes(x = Cancer_label, y = n, fill = Cancer_label)) +
+  geom_col(width = 0.55, alpha = 0.88) +
+  geom_text(aes(label = paste0(n, "\n(", round(100*n/22,1),"%)"), y = n + 0.2), vjust = 0, size = 3.5) +
+  scale_fill_manual(values = c("NM" = "#8E44AD","M" = "#F39C12")) +
+  labs(title = "Tipo de cáncer", x = NULL, y = "N") +
+  theme_minimal(base_size = 12) + theme(legend.position = "none")
+
+p5 <- ggplot(datos %>% count(Estadio_label) %>% arrange(desc(n)),
+             aes(x = reorder(Estadio_label, n), y = n, fill = Estadio_label)) +
+  geom_col(alpha = 0.88) +
+  geom_text(aes(label = n), hjust = -0.3, size = 3.5) +
+  coord_flip() +
+  scale_fill_brewer(palette = "Blues", direction = -1) +
+  labs(title = "Estadio", x = NULL, y = "N") +
+  theme_minimal(base_size = 12) + theme(legend.position = "none")
+
+subplot(ggplotly(p3), ggplotly(p4), ggplotly(p5), nrows = 1, shareY = FALSE, titleX = TRUE)
+```
+
+***
+
+## Test de normalidad — Shapiro-Wilk
+
+```{r shapiro-wilk}
+
+# Test de Shapiro-Wilk para todas las variables continuas en T0
+
+vars_continuas <- intersect(all_vars_dom, names(datos))
+
+resultados_shapiro <- lapply(vars_continuas, function(var) {
+  x <- suppressWarnings(as.numeric(gsub(",", ".", as.character(datos[[var]]))))
+  x <- na.omit(x)
+  if (length(x) < 3 || length(unique(x)) < 2) return(NULL)
+
+  sw <- tryCatch(shapiro.test(x), error = function(e) NULL)
+  if (is.null(sw)) return(NULL)
+
+  data.frame(
+    Variable  = unname(all_labels[var]),
+    Dominio   = unname(dominio_var[var]),
+    N         = length(x),
+    Estadistico_W = round(sw$statistic, 4),
+    p_valor   = round(sw$p.value, 4),
+    Normalidad = ifelse(sw$p.value >= 0.05, "No rechazada", "Rechazada"),
+    stringsAsFactors = FALSE
+  )
+}) %>% bind_rows()
+
+# Resumen
+
+cat("Variables con normalidad rechazada (p<0.05):",
+    sum(resultados_shapiro$Normalidad == "Rechazada"), "de",
+    nrow(resultados_shapiro), "\n")
+
+resultados_shapiro %>%
+  arrange(p_valor) %>%
+  kable(caption = "Test de Shapiro-Wilk — variables T0",
+        align = c("l","l","r","r","r","c")) %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = TRUE, font_size = 11) %>%
+  row_spec(which(resultados_shapiro %>% arrange(p_valor) %>% pull(Normalidad) == "Rechazada"),
+           background = "#FADBD8") %>%
+  row_spec(0, bold = TRUE, background = "#2C3E50", color = "white")
+```
+
+***
+
+## Estadísticos descriptivos T0 y T1
+
+```{r descriptivos-t0-t1}
+
+desc_t0_t1 <- lapply(all_vars_dom, function(var) {
+  var_t1 <- paste0(var, "_t1")
+  if (!(var %in% names(datos)) || !(var_t1 %in% names(datos))) return(NULL)
+
+  x0 <- suppressWarnings(as.numeric(gsub(",", ".", as.character(datos[[var]]))))
+  x1 <- suppressWarnings(as.numeric(gsub(",", ".", as.character(datos[[var_t1]]))))
+
+  data.frame(
+    Dominio    = unname(dominio_var[var]),
+    Variable   = unname(all_labels[var]),
+    `N T0`     = sum(!is.na(x0)),
+    `Media T0` = round(mean(x0, na.rm=TRUE), 2),
+    `DE T0`    = round(sd(x0, na.rm=TRUE), 2),
+    `Mediana T0` = round(median(x0, na.rm=TRUE), 2),
+    `RIC T0`   = paste0("[", round(quantile(x0, 0.25, na.rm=TRUE), 2), " – ",
+                         round(quantile(x0, 0.75, na.rm=TRUE), 2), "]"),
+    `Media T1` = round(mean(x1, na.rm=TRUE), 2),
+    `DE T1`    = round(sd(x1, na.rm=TRUE), 2),
+    `Mediana T1` = round(median(x1, na.rm=TRUE), 2),
+    `RIC T1`   = paste0("[", round(quantile(x1, 0.25, na.rm=TRUE), 2), " – ",
+                         round(quantile(x1, 0.75, na.rm=TRUE), 2), "]"),
+    check.names = FALSE,
+    stringsAsFactors = FALSE
+  )
+}) %>% bind_rows()
+
+desc_t0_t1 %>%
+  kable(caption = "Estadísticos descriptivos T0 y T1 (media, DE, mediana, RIC)",
+        align = c("l","l","r","r","r","r","l","r","r","r","l")) %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = TRUE, font_size = 11) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, background = "#2C3E50", color = "white")
+```
+
+***
+
+## Test de Wilcoxon pareado (T0 vs T1)
+
+```{r wilcoxon-test}
+# Test de wilcoxon pareado para todas las variables T0 vs T1
+
+resultados <- lapply(all_vars_dom, function(var) {
+  var_t1 <- paste0(var, "_t1")
+  if (!(var %in% names(datos)) || !(var_t1 %in% names(datos))) return(NULL)
+
+  df <- datos %>%
+    dplyr::select(all_of(c(var, var_t1))) %>%
+    mutate(across(everything(),
+                  ~ suppressWarnings(as.numeric(gsub(",", ".", as.character(.)))))) %>%
+    na.omit()
+
+  if (nrow(df) < 5 || all(df[[var_t1]] - df[[var]] == 0)) return(NULL)
+
+  test <- wilcox.test(df[[var_t1]], df[[var]], paired = TRUE, exact = FALSE)
+
+  data.frame(
+    variable     = var,
+    etiqueta     = unname(all_labels[var]),
+    dominio      = unname(dominio_var[var]),
+    n            = nrow(df),
+    media_t0     = round(mean(df[[var]],    na.rm=TRUE), 2),
+    mediana_t0   = round(median(df[[var]],  na.rm=TRUE), 2),
+    media_t1     = round(mean(df[[var_t1]], na.rm=TRUE), 2),
+    mediana_t1   = round(median(df[[var_t1]], na.rm=TRUE), 2),
+    cambio_medio = round(mean(df[[var_t1]] - df[[var]], na.rm=TRUE), 2),
+    p_value      = test$p.value,
+    stringsAsFactors = FALSE
+  )
+}) %>% bind_rows()
+```
+
+### Tabla completa
+
+```{r tabla-wilcox-completa}
+tabla_kable <- resultados %>%
+  mutate(
+    p_value = round(p_value, 4),
+    sig     = ifelse(p_value < 0.1, "Sí", "No")
+  ) %>%
+  arrange(p_value) %>%
+  dplyr::select(
+    Dominio        = dominio,
+    Variable       = etiqueta,
+    N              = n,
+    `T0 (media)`   = media_t0,
+    `T0 (mediana)` = mediana_t0,
+    `T1 (media)`   = media_t1,
+    `T1 (mediana)` = mediana_t1,
+    `Cambio medio` = cambio_medio,
+    `p-valor`      = p_value,
+    `Sig. p<0.05`  = sig
+  )
+
+tabla_kable %>%
+  kable(caption = "Test de Wilcoxon pareado T0 vs T1 — todos los dominios",
+        align = c("l","l","r","r","r","r","r","r","r","c")) %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = TRUE, font_size = 12) %>%
+  row_spec(which(tabla_kable$`Sig. p<0.1` == "Sí"), background = "#C6EFCE", bold = TRUE) %>%
+  column_spec(1, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, background = "#2C3E50", color = "white")
+```
+
+### Variables significativas (p < 0.1)
+
+```{r tabla-sig}
+pct_cambio_func <- function(var) {
+  var_t1 <- paste0(var, "_t1")
+  if (!(var %in% names(datos)) || !(var_t1 %in% names(datos))) return(c(NA, NA, NA))
+  df <- datos %>%
+    dplyr::select(all_of(c(var, var_t1))) %>%
+    mutate(across(everything(),
+                  ~ suppressWarnings(as.numeric(gsub(",", ".", as.character(.)))))) %>%
+    na.omit()
+  if (nrow(df) == 0) return(c(NA, NA, NA))
+  
+  dif <- df[[var_t1]] - df[[var]]
+  n   <- nrow(df)
+  
+  incremento <- round(100 * sum(dif > 0) / n, 1)
+  sin_cambio <- round(100 * sum(dif == 0) / n, 1)
+  descenso   <- round(100 * sum(dif < 0) / n, 1)
+  
+  c(incremento, sin_cambio, descenso)
+}
+
+sig10 <- resultados %>%
+  filter(p_value < 0.1) %>%
+  arrange(p_value) %>%
+  mutate(
+    cambios          = lapply(variable, pct_cambio_func),
+    `% Incremento`   = sapply(cambios, `[`, 1),
+    `% Sin cambio`   = sapply(cambios, `[`, 2),
+    `% Descenso`     = sapply(cambios, `[`, 3),
+    p_value          = round(p_value, 4)
+  ) %>%
+  dplyr::select(
+    Variable       = etiqueta,
+    N              = n,
+    `Mediana T0`   = mediana_t0,
+    `Mediana T1`   = mediana_t1,
+    `Cambio medio` = cambio_medio,
+    `% Incremento`,
+    `% Sin cambio`,
+    `% Descenso`,
+    `p-valor`      = p_value
+  )
+
+if (nrow(sig10) > 0) {
+  sig10 %>%
+    kable(caption = paste0("Variables con cambio significativo T0–T1 (p < 0.10)", nrow(sig10)),
+          align = c("l","r","r","r","r","r","r","r","r")) %>%
+    kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                  full_width = TRUE, font_size = 12) %>%
+    row_spec(0, bold = TRUE, background = "#2C3E50", color = "white")
+} else {
+  cat("Ninguna variable con p < 0.10.\n")
+}
+```
+
+
+
+***
+
+## Gráficos — solo variables significativas (p < 0.05)
+
+
+```{r graficos-sig10, fig.height=16, fig.width=12}
+vars_sig10 <- resultados %>% filter(p_value < 0.1) %>% pull(variable)
+
+long_sig10 <- lapply(vars_sig10, function(v) {
+  v_t1 <- paste0(v, "_t1")
+  datos %>%
+    dplyr::select(id_definitivo, T0 = all_of(v), T1 = all_of(v_t1)) %>%
+    mutate(
+      T0       = suppressWarnings(as.numeric(gsub(",", ".", as.character(T0)))),
+      T1       = suppressWarnings(as.numeric(gsub(",", ".", as.character(T1)))),
+      Variable = unname(all_labels[v]),
+      p_val    = round(resultados$p_value[resultados$variable == v], 3)
+    ) %>%
+    pivot_longer(c(T0, T1), names_to = "Tiempo", values_to = "Valor") %>%
+    filter(!is.na(Valor))
+}) %>% bind_rows() %>%
+  mutate(Tiempo = factor(Tiempo, levels = c("T0", "T1")))
+
+# Media ± SE por variable y tiempo
+media_sig10 <- long_sig10 %>%
+  group_by(Variable, Tiempo, p_val) %>%
+  summarise(Media = mean(Valor, na.rm = TRUE),
+            SE    = sd(Valor, na.rm = TRUE) / sqrt(n()),
+            .groups = "drop")
+
+# Significación
+annot <- long_sig10 %>%
+  group_by(Variable, p_val) %>%
+  summarise(y_pos = max(Valor, na.rm = TRUE) * 1.12, .groups = "drop") %>%
+  mutate(
+    Tiempo = factor("T1", levels = c("T0","T1")),
+    signif = case_when(
+      p_val < 0.001 ~ "***",
+      p_val < 0.01  ~ "**",
+      p_val < 0.05  ~ "*",
+      p_val < 0.1   ~ "·",
+      TRUE ~ ""
+    )
+  )
+
+ggplot(media_sig10, aes(x = Tiempo, y = Media, fill = Tiempo)) +
+  geom_col(width = 0.6, alpha = 0.88) +
+  geom_errorbar(aes(ymin = Media - SE, ymax = Media + SE),
+                width = 0.2, linewidth = 0.6) +
+  geom_point(data = long_sig10,
+             aes(x = Tiempo, y = Valor, color = Tiempo),
+             position = position_jitter(width = 0.1, seed = 42),
+             size = 1.8, alpha = 0.75, inherit.aes = FALSE) +
+  geom_text(data = annot,
+            aes(x = 1.5, y = y_pos, label = signif),
+            inherit.aes = FALSE, size = 5, fontface = "bold", color = "#2C3E50") +
+  facet_wrap(~ Variable, scales = "free_y", ncol = 3) +
+  scale_fill_manual(values  = c("T0" = "#2980B9", "T1" = "#27AE60")) +
+  scale_color_manual(values = c("T0" = "#2980B9", "T1" = "#27AE60")) +
+  labs(title = "Variables con cambio significativo T0–T1 (p < 0.10)",
+       x = NULL, y = "Media ± Error estándar") +
+  theme_minimal(base_size = 11) +
+  theme(
+    legend.title    = element_blank(),
+    legend.position = "bottom",
+    strip.text      = element_text(face = "bold", size = 9),
+    axis.text.x     = element_text(size = 9),
+    panel.spacing   = unit(1, "lines")
+  )
+```
+
+***
+
+# PARTE II: Modelos Predictivos — mejora_6mwt
+
+```{r prep-predictivos}
+
+# Variable respuesta: mejora_6mwt (binaria)
+
+vars_factor_6mwt <- intersect(
+  c("grupo", "sexo_participante", "tipo", "estadio"), names(datos)
+)
+vars_numericas_6mwt <- intersect(
+  c("edad_participante", "adh_infprograma1", variables_t0), names(datos)
+)
+
+datos <- datos %>%
+  mutate(across(all_of(vars_factor_6mwt),    as.factor)) %>%
+  mutate(across(all_of(vars_numericas_6mwt),
+                ~ as.numeric(gsub(",", ".", as.character(.)))))
+
+datos <- datos %>%
+  mutate(
+    cambio_6mwt = disttotal_6mwt_confis_t1 - disttotal_6mwt_confis,
+    mejora_6mwt = ifelse(cambio_6mwt > 0, 1, 0)
+  )
+datos$mejora_6mwt <- as.factor(datos$mejora_6mwt)
+
+vars_candidatas_6mwt <- unique(c(
+  variables_t0,
+  intersect(c("grupo", "edad_participante", "sexo_participante",
+              "tipo", "estadio", "adh_infprograma1"), names(datos))
+))
+vars_candidatas_6mwt <- intersect(vars_candidatas_6mwt, names(datos))
+vars_candidatas_6mwt <- setdiff(vars_candidatas_6mwt, "disttotal_6mwt_confis")
+cat("Distribución mejora_6mwt:\n")
+print(table(datos$mejora_6mwt))
+datos$mejora_6mwt=as.numeric(as.character(datos$mejora_6mwt))
+
+```
+
+***
+
+## Modelo 1: Regresión logística forward stepwise
+
+### Análisis univariante
+
+```{r logistica_univariante_mejora}
+resultados_log_uni_6mwt <- lapply(vars_candidatas_6mwt, function(var) {
+  df <- datos %>%
+    dplyr::select(mejora_6mwt, dplyr::all_of(var)) %>% na.omit()
+  if (nrow(df) <= 5) return(NULL)
+  if (is.character(df[[var]])) df[[var]] <- as.factor(df[[var]])
+  if (is.factor(df[[var]]) && nlevels(df[[var]]) < 2) return(NULL)
+  modelo <- tryCatch(
+    glm(as.formula(paste("mejora_6mwt ~", var)), data = df, family = binomial),
+    error = function(e) NULL)
+  if (is.null(modelo)) return(NULL)
+  p_global <- tryCatch(drop1(modelo, test="Chisq")[2,"Pr(>Chi)"], error=function(e) NA)
+  data.frame(variable=var, n=nrow(df),
+             tipo=ifelse(is.factor(df[[var]]),"categorica","numerica"),
+             p_value=p_global, stringsAsFactors=FALSE)
+})
+resultados_log_uni_6mwt <- do.call(rbind, resultados_log_uni_6mwt)
+resultados_log_uni_6mwt_ordenados <- resultados_log_uni_6mwt %>%
+  filter(!is.na(p_value)) %>% arrange(p_value)
+
+cat(" Resultados univariante\n")
+print(resultados_log_uni_6mwt_ordenados)
+resultados_log_uni_6mwt_ordenados %>%
+  filter(p_value < 0.10) %>%
+  mutate(
+    p_value = round(p_value, 4)
+  ) %>%
+  dplyr::select(
+    Variable  = variable,
+    N         = n,
+    Tipo      = tipo,
+    `p-valor` = p_value
+  ) %>%
+  kable(caption = "Variables seleccionadas en el univariante (p < 0.10) — Regresión logística forward (mejora 6MWT)",
+        align = c("l","c","c","r")) %>%
+  kable_styling(bootstrap_options = c("striped","condensed"), full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#2C3E50", color = "white") %>%
+  row_spec(seq_len(nrow(filter(resultados_log_uni_6mwt_ordenados, p_value < 0.10))),
+           background = "#D6EAF8", bold = TRUE)
+```
+
+
+### Modelo multivariante forward stepwise
+
+```{r df_forward_mejora}
+vars_forward <- resultados_log_uni_6mwt_ordenados %>%
+  filter(p_value < 0.10) %>% pull(variable)
+if (length(vars_forward)==0) {
+   cat("Ninguna variable con p < 0.10 en el univariante. No se ajusta modelo multivariante.\n")
+}
+
+df_forward <- datos %>%
+  dplyr::select(dplyr::all_of(c("mejora_6mwt", vars_forward))) %>%
+  filter(!is.na(mejora_6mwt))
+
+vars_factor_fw <- intersect(c("grupo","sexo_participante","tipo","estadio"), names(df_forward))
+df_forward <- df_forward %>%
+  mutate(across(all_of(vars_factor_fw), as.factor)) %>%
+  mutate(across(-c(mejora_6mwt, all_of(vars_factor_fw)),
+                ~ as.numeric(gsub(",",".",as.character(.)))))
+
+vars_num_fw <- setdiff(names(df_forward)[sapply(df_forward,is.numeric)], "mejora_6mwt")
+for (v in vars_num_fw)  df_forward[[v]][is.na(df_forward[[v]])] <- median(df_forward[[v]], na.rm=TRUE)
+for (v in vars_factor_fw) df_forward[[v]][is.na(df_forward[[v]])] <- moda(df_forward[[v]])
+df_forward <- df_forward %>% droplevels()
+
+vars_factor_fw_ok <- vars_factor_fw[sapply(vars_factor_fw, function(v) nlevels(df_forward[[v]])>=2)]
+vars_forward_ok   <- c(setdiff(vars_forward, vars_factor_fw), vars_factor_fw_ok)
+```
+
+```{r smote_forward_mejora}
+
+library(ROSE)
+set.seed(199)
+rose_forward<- ROSE(mejora_6mwt ~ ., data = df_forward, N = 20, p = 0.5, hmult.majo = 0.5, hmult.mino = 0.5)$data
+
+table(rose_forward$mejora_6mwt)
+df_forward_original<-df_forward
+df_forward<-rose_forward
+
+# Ninguna variable numérica puede ser negativa
+vars_num <- names(df_forward)[sapply(df_forward, is.numeric)]
+df_forward[vars_num] <- lapply(df_forward[vars_num], function(x) pmax(x, 0))
+```
+
+```{r foward_mejora}
+modelo_nulo     <- glm(mejora_6mwt ~ 1, data=df_forward, family=binomial)
+formula_completa <- as.formula(paste("mejora_6mwt ~", paste(vars_forward_ok, collapse=" + ")))
+modelo_completo <- tryCatch(glm(formula_completa, data=df_forward, family=binomial),
+                            error=function(e){ message(e$message); NULL })
+
+if (!is.null(modelo_completo)) {
+  modelo_forward <- step(modelo_nulo,
+                         scope=list(lower=modelo_nulo, upper=modelo_completo),
+                         direction="forward", trace=TRUE)
+  cat("Modelo de regresión logística forward — mejora 6MWT")
+  print(summary(modelo_forward))
+
+  coefs_fw <- summary(modelo_forward)$coefficients
+  coefs_fw <- coefs_fw[rownames(coefs_fw)!="(Intercept)",,drop=FALSE]
+  if (nrow(coefs_fw)>0) {
+    ic_fw <- tryCatch(confint(modelo_forward), error=function(e) NULL)
+    if (!is.null(ic_fw)) ic_fw <- ic_fw[rownames(ic_fw)!="(Intercept)",,drop=FALSE]
+    tabla_forward <- data.frame(
+      Variable=rownames(coefs_fw),
+      OR=round(exp(coefs_fw[,"Estimate"]),3),
+      IC95_inf=if(!is.null(ic_fw)) round(exp(ic_fw[,1]),3) else NA,
+      IC95_sup=if(!is.null(ic_fw)) round(exp(ic_fw[,2]),3) else NA,
+      p_value=round(coefs_fw[,"Pr(>|z|)"],4), row.names=NULL)
+    #Coeficientes estandarizados
+    sds_fw_mejora <- sapply(tabla_forward$Variable, function(v) {
+  if (v %in% names(df_forward_original)) sd(df_forward_original[[v]], na.rm = TRUE) else NA
+})
+betas_raw_mejora <- coefs_fw[tabla_forward$Variable, "Estimate"]
+tabla_forward$beta_std <- round(betas_raw_mejora * sds_fw_mejora, 3)
+    cat("OR e IC95% del modelo forward\n")
+    print(tabla_forward)
+    cat("\nAIC:", round(AIC(modelo_forward),2),"\n")
+  } else {
+    cat("El forward no añadió ninguna variable.\n")
+  }
+}
+
+if (exists("tabla_forward") && nrow(tabla_forward) > 0) {
+  tabla_forward %>%
+    mutate(
+      OR_fmt = formatC(OR, format = "e", digits = 2),
+      Sig    = case_when(
+        p_value < 0.001 ~ "***",
+        p_value < 0.01  ~ "**",
+        p_value < 0.05  ~ "*",
+        p_value < 0.10  ~ "·",
+        TRUE ~ ""
+      )
+    ) %>%
+    dplyr::select(Variable, `OR` = OR_fmt, `β estandarizado` = beta_std, `p-valor` = p_value, ` ` = Sig)%>%
+    kable(caption = "Modelo forward stepwise — Odds Ratios",
+          align = c("l","c","r","c")) %>%
+    kable_styling(bootstrap_options = c("striped","condensed"), full_width = FALSE) %>%
+    row_spec(0, bold = TRUE, background = "#2C3E50", color = "white") %>%
+    footnote(general = "· p<0.10  * p<0.05  ** p<0.01  *** p<0.001",
+             general_title = "")
+}
+```
+
+### Evaluación LOOCV
+
+```{r loocv_forward_mejora}
+if (length(vars_forward) == 0 || is.null(modelo_completo)) {
+  cat("No hay modelo. Se omite LOOCV.\n")
+} else {
+ n_fw <- nrow(df_forward_original)
+
+  probs_fw <- numeric(n_fw)
+  pred_fw  <- character(n_fw)
+  for (i in seq_len(n_fw)) {
+    train_i <- df_forward[-i, ]
+    test_i <- df_forward_original[i, , drop=FALSE]
+
+    mod_i <- tryCatch(
+      step(glm(mejora_6mwt ~ 1, data=train_i, family=binomial),
+           scope = list(lower = glm(mejora_6mwt ~ 1, data=train_i, family=binomial),
+                        upper = glm(formula_completa, data=train_i, family=binomial)),
+           direction = "forward", trace = FALSE),
+      error = function(e) NULL)
+    if (is.null(mod_i)) { probs_fw[i] <- NA; pred_fw[i] <- NA; next }
+    probs_fw[i] <- predict(mod_i, test_i, type="response")
+    pred_fw[i]  <- ifelse(probs_fw[i] > 0.5, "1", "0")
+  }
+  obs_fw      <- as.character(df_forward_original$mejora_6mwt)
+
+  valid_idx   <- !is.na(pred_fw)
+  conf_mat_fw <- table(Observado = obs_fw[valid_idx], Predicho = pred_fw[valid_idx])
+  auc_fw      <- tryCatch(pROC::roc(df_forward_original$mejora_6mwt, probs_fw,
+                                    quiet=TRUE, direction="<"), error=function(e) NULL)
+
+  # Métricas
+  TP <- conf_mat_fw["1","1"]; TN <- conf_mat_fw["0","0"]
+  FP <- conf_mat_fw["0","1"]; FN <- conf_mat_fw["1","0"]
+  accuracy_fw  <- round((TP + TN) / sum(conf_mat_fw), 3)
+  sens_fw      <- round(TP / (TP + FN), 3)
+  spec_fw      <- round(TN / (TN + FP), 3)
+  bal_acc_fw   <- round((sens_fw + spec_fw) / 2, 3)
+  auc_val_fw   <- if (!is.null(auc_fw)) round(as.numeric(auc_fw$auc), 3) else NA
+
+  # Matriz de confusión
+    print(conf_mat_fw)
+
+  # Curva ROC
+  if (!is.null(auc_fw))
+    plot(auc_fw, main = paste0("Curva ROC — regresión logística forward para la mejora de la distancia
+recorrida (6MWT)  |  AUC = ", auc_val_fw))
+
+  # Tabla métricas
+  data.frame(
+    Métrica = c("Accuracy", "Balanced Accuracy", "Sensibilidad",
+                "Especificidad", "AUC"),
+    Valor   = c(accuracy_fw, bal_acc_fw, sens_fw, spec_fw, auc_val_fw)
+  ) %>%
+    kable(caption = "Rendimiento LOOCV — Regresión Logística Forward (mejora 6MWT)",
+          align = c("l","c")) %>%
+    kable_styling(bootstrap_options = c("striped","condensed"),
+                  full_width = FALSE) %>%
+    row_spec(0, bold = TRUE, background = "#2C3E50", color = "white") %>%
+    row_spec(2, bold = TRUE, background = "#D6EAF8")
+}
+```
+
+***
+
+## Modelo 2: Naive Bayes
+
+### Filtro univariante y selección de variables
+```{r nb_univariante_mejora}
+resultados_uni_nb <- lapply(vars_candidatas_6mwt, function(var) {
+  df <- datos %>% dplyr::select(mejora_6mwt, dplyr::all_of(var)) %>% na.omit()
+  if (nrow(df) <= 5) return(NULL)
+  if (is.factor(df[[var]]) && nlevels(df[[var]]) < 2) return(NULL)
+  if (is.factor(df[[var]]) || is.character(df[[var]])) {
+    tbl <- table(df[[var]], df$mejora_6mwt)
+    p   <- tryCatch(fisher.test(tbl, simulate.p.value = TRUE)$p.value, error = function(e) NA)
+    tipo_test <- "Fisher"
+  } else {
+    g0 <- df[[var]][df$mejora_6mwt == "0"]
+    g1 <- df[[var]][df$mejora_6mwt == "1"]
+    p  <- tryCatch(wilcox.test(g0, g1, exact = FALSE)$p.value, error = function(e) NA)
+    tipo_test <- "Wilcoxon"
+  }
+  data.frame(variable = var, n = nrow(df), test = tipo_test,
+             p_value = round(p, 4), stringsAsFactors = FALSE)
+})
+resultados_uni_nb <- do.call(rbind, resultados_uni_nb)
+resultados_uni_nb_ordenados <- resultados_uni_nb %>%
+  filter(!is.na(p_value)) %>% arrange(p_value)
+
+cat("Filtro univariante (Wilcoxon/Fisher) \n")
+print(resultados_uni_nb_ordenados)
+
+vars_nb_multi <- resultados_uni_nb_ordenados %>%
+  filter(p_value < 0.10) %>% pull(variable)
+
+if (length(vars_nb_multi) == 0) {
+  cat("Ninguna variable con p < 0.10 en el univariante. No se ajusta modelo Naive Bayes.\n")
+}
+cat("\nVariables seleccionadas (p<0.10):", length(vars_nb_multi), "\n")
+
+tabla_nb_univariante <- resultados_uni_nb_ordenados %>%
+  filter(p_value < 0.10) %>%
+  mutate(
+    p_value = round(p_value, 4),
+    Sig = case_when(
+      p_value < 0.001 ~ "***",
+      p_value < 0.01  ~ "**",
+      p_value < 0.05  ~ "*",
+      p_value < 0.10  ~ "·",
+      TRUE ~ ""
+    )
+  ) %>%
+  dplyr::select(Variable = variable, N = n, Test = test,
+                `p-valor` = p_value, ` ` = Sig)
+
+tabla_nb_univariante %>%
+  kable(caption = "Variables seleccionadas en el filtro univariante (p < 0.10) — Naive Bayes",
+        align = c("l", "c", "c", "r", "c")) %>%
+  kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#2C3E50", color = "white") %>%
+  footnote(general = "· p<0.10  * p<0.05  ** p<0.01  *** p<0.001", general_title = "")
+```
+
+### Preparación de datos
+```{r df_nb_mejora}
+if (length(vars_nb_multi) > 0) {
+
+  df_nb_multi <- datos %>%
+    dplyr::select(dplyr::all_of(c("mejora_6mwt", vars_nb_multi))) %>%
+    filter(!is.na(mejora_6mwt))
+
+  vars_factor_nb <- intersect(
+    c("grupo", "sexo_participante", "tipo", "estadio"),
+    names(df_nb_multi)
+  )
+
+  df_nb_multi <- df_nb_multi %>%
+    mutate(across(all_of(vars_factor_nb), as.factor)) %>%
+    mutate(across(
+      -c(mejora_6mwt, all_of(vars_factor_nb)),
+      ~ suppressWarnings(as.numeric(gsub(",", ".", as.character(.))))
+    ))
+
+  vars_num_nb <- setdiff(
+    names(df_nb_multi)[sapply(df_nb_multi, is.numeric)],
+    "mejora_6mwt"
+  )
+
+  for (v in vars_num_nb) {
+    df_nb_multi[[v]][is.na(df_nb_multi[[v]])] <- median(df_nb_multi[[v]], na.rm = TRUE)
+  }
+  for (v in vars_factor_nb) {
+    df_nb_multi[[v]][is.na(df_nb_multi[[v]])] <- moda(df_nb_multi[[v]])
+  }
+
+  df_nb_multi <- df_nb_multi %>%
+    mutate(mejora_6mwt = factor(mejora_6mwt, levels = c("0", "1"))) %>%
+    droplevels()
+}
+```
+
+### Balanceo de clases con ROSE
+```{r rose_nb_mejora}
+  set.seed(199)
+rose_nb_multi <- ROSE(mejora_6mwt ~ ., data = df_nb_multi,
+                      N = 20, p = 0.5,
+                      hmult.majo = 0.5, hmult.mino = 0.5)$data
+
+# Ninguna variable numérica puede ser negativa
+vars_num_rose <- names(rose_nb_multi)[sapply(rose_nb_multi, is.numeric)]
+rose_nb_multi[vars_num_rose] <- lapply(rose_nb_multi[vars_num_rose], function(x) pmax(x, 0))
+
+table(rose_nb_multi$mejora_6mwt)
+df_nb_multi_original <- df_nb_multi
+df_nb_multi <- rose_nb_multi
+```
+
+### Modelo Naive Bayes
+```{r nb_modelo_mejora}
+if (length(vars_nb_multi) == 0) {
+  cat("No hay variables seleccionadas. No se ajusta modelo Naive Bayes.\n")
+} else {
+
+  modelo_nb_multi <- e1071::naiveBayes(mejora_6mwt ~ ., data = df_nb_multi)
+
+  cat(" Naive Bayes — mejora 6MWT\n")
+  cat(" Variables incluidas:", length(vars_nb_multi), "\n")
+  print(modelo_nb_multi)}
+```
+
+### Evaluación LOOCV
+```{r loocv_nb_mejora}
+if (length(vars_nb_multi) == 0) {
+  cat("No hay modelo. Se omite LOOCV.\n")
+} else {
+
+  n_nb <- nrow(df_nb_multi_original)
+  probs_multi <- numeric(n_nb)
+  pred_clase  <- character(n_nb)
+
+  for (i in seq_len(n_nb)) {
+    train <- df_nb_multi[-i, ]          
+    test  <- df_nb_multi_original[i, , drop = FALSE]
+
+    if (length(unique(train$mejora_6mwt)) < 2) {
+      probs_multi[i] <- NA; pred_clase[i] <- NA; next
+    }
+
+    mod_i <- tryCatch(
+      e1071::naiveBayes(mejora_6mwt ~ ., data = train),
+      error = function(e) NULL
+    )
+
+    if (is.null(mod_i)) {
+      probs_multi[i] <- NA; pred_clase[i] <- NA; next
+    }
+
+    raw_i          <- predict(mod_i, test, type = "raw")
+    probs_multi[i] <- raw_i[, "1"]
+    pred_clase[i]  <- as.character(predict(mod_i, test, type = "class"))
+  }
+
+  obs_clase  <- factor(df_nb_multi_original$mejora_6mwt, levels = c("0", "1"))
+  pred_clase <- factor(pred_clase, levels = c("0", "1"))
+  valid_idx  <- !is.na(pred_clase) & !is.na(probs_multi)
+
+  conf_mat_nb <- table(Observado = obs_clase[valid_idx], Predicho = pred_clase[valid_idx])
+  print(conf_mat_nb)
+
+  TP <- ifelse("1" %in% rownames(conf_mat_nb) & "1" %in% colnames(conf_mat_nb),
+               conf_mat_nb["1","1"], 0)
+  TN <- ifelse("0" %in% rownames(conf_mat_nb) & "0" %in% colnames(conf_mat_nb),
+               conf_mat_nb["0","0"], 0)
+  FP <- ifelse("0" %in% rownames(conf_mat_nb) & "1" %in% colnames(conf_mat_nb),
+               conf_mat_nb["0","1"], 0)
+  FN <- ifelse("1" %in% rownames(conf_mat_nb) & "0" %in% colnames(conf_mat_nb),
+               conf_mat_nb["1","0"], 0)
+
+  accuracy_nb  <- round((TP + TN) / sum(conf_mat_nb), 3)
+  sens_nb      <- round(TP / (TP + FN), 3)
+  spec_nb      <- round(TN / (TN + FP), 3)
+  bal_acc_nb   <- round((sens_nb + spec_nb) / 2, 3)
+
+  auc_nb <- tryCatch(
+    pROC::roc(response = obs_clase[valid_idx], predictor = probs_multi[valid_idx],
+              levels = c("0","1"), direction = "<", quiet = TRUE),
+    error = function(e) NULL
+  )
+  auc_val_nb <- if (!is.null(auc_nb)) round(as.numeric(auc_nb$auc), 3) else NA
+
+  # Matriz de confusión
+  as.data.frame.matrix(conf_mat_nb) %>%
+    tibble::rownames_to_column("Observado") %>%
+    kable(caption = "Matriz de confusión LOOCV — Naive Bayes", align = "c") %>%
+    kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE) %>%
+    row_spec(0, bold = TRUE, background = "#2C3E50", color = "white")
+
+  # Curva ROC
+  if (!is.null(auc_nb))
+    plot(auc_nb, main = paste0("Curva ROC — Naive Bayes para la mejora de la distancia recorrida (6MWT) | AUC = ", auc_val_nb))
+
+  # Tabla métricas
+  data.frame(
+    Métrica = c("Accuracy", "Balanced Accuracy", "Sensibilidad", "Especificidad", "AUC"),
+    Valor   = c(accuracy_nb, bal_acc_nb, sens_nb, spec_nb, auc_val_nb)
+  ) %>%
+    kable(caption = "Rendimiento LOOCV — Naive Bayes (mejora 6MWT)",
+          align = c("l", "c")) %>%
+    kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE) %>%
+    row_spec(0, bold = TRUE, background = "#2C3E50", color = "white") %>%
+    row_spec(2, bold = TRUE, background = "#D6EAF8")
+}
+```
+***
+## Modelo 3: LASSO
+
+### Preparación de datos
+```{r lasso-prep-mejora}
+df_lasso <- datos %>%
+  dplyr::select(dplyr::all_of(c("mejora_6mwt", vars_candidatas_6mwt))) %>%
+  filter(!is.na(mejora_6mwt))
+
+vars_factor_lasso <- intersect(c("grupo","sexo_participante","tipo","estadio"), names(df_lasso))
+
+df_lasso <- df_lasso %>%
+  mutate(across(all_of(vars_factor_lasso), as.factor)) %>%
+  mutate(across(-c(mejora_6mwt, all_of(vars_factor_lasso)),
+                ~ as.numeric(gsub(",",".",as.character(.)))))
+
+vars_num_lasso <- setdiff(names(df_lasso)[sapply(df_lasso, is.numeric)], "mejora_6mwt")
+for (v in vars_num_lasso)    df_lasso[[v]][is.na(df_lasso[[v]])] <- median(df_lasso[[v]], na.rm=TRUE)
+for (v in vars_factor_lasso) df_lasso[[v]][is.na(df_lasso[[v]])] <- moda(df_lasso[[v]])
+df_lasso <- df_lasso %>% droplevels()
+
+formula_lasso <- as.formula(paste("mejora_6mwt ~", paste(vars_candidatas_6mwt, collapse=" + ")))
+
+X_original        <- model.matrix(formula_lasso, data = df_lasso)[, -1]
+y_original        <- as.numeric(as.character(df_lasso$mejora_6mwt))
+df_lasso_original <- df_lasso
+```
+
+### Balanceo de clases con ROSE
+```{r lasso-rose-mejora}
+set.seed(199)
+df_lasso_rose <- ROSE(mejora_6mwt ~ ., data = df_lasso,
+                      N = 20, p = 0.5,
+                      hmult.majo = 0.5, hmult.mino = 0.5)$data
+
+# Ninguna variable numérica puede ser negativa
+vars_num_rose <- names(df_lasso_rose)[sapply(df_lasso_rose, is.numeric)]
+df_lasso_rose[vars_num_rose] <- lapply(df_lasso_rose[vars_num_rose], function(x) pmax(x, 0))
+
+table(df_lasso_rose$mejora_6mwt)
+
+X_rose <- model.matrix(formula_lasso, data = df_lasso_rose)[, -1]
+y_rose <- as.numeric(as.character(df_lasso_rose$mejora_6mwt))
+```
+
+### Rejilla de lambdas y gráfica
+```{r lasso-graficas-mejora}
+set.seed(123)
+fit_lasso    <- glmnet(X_rose, y_rose, alpha = 1, family = "binomial")
+fit_lasso_cv <- cv.glmnet(X_rose, y_rose, alpha = 1, lambda = fit_lasso$lambda,
+                           family = "binomial", nfolds = nrow(X_rose), type.measure = "class")
+
+rejilla_lambda <- data.frame(
+  lambda     = fit_lasso$lambda,
+  log_lambda = log(fit_lasso$lambda),
+  n_vars     = fit_lasso$df,
+  error_cv   = fit_lasso_cv$cvm
+)
+
+lambda_min <- fit_lasso_cv$lambda.min
+nvars_min  <- rejilla_lambda$n_vars[which.min(abs(rejilla_lambda$lambda - lambda_min))]
+cat("lambda.min:", round(lambda_min, 5), "| Predictores seleccionados:", nvars_min, "\n")
+
+par(mar = c(5,4,4,4)+0.1)
+plot(rejilla_lambda$log_lambda, rejilla_lambda$n_vars, type = "s",
+     xlab = "log(lambda)", ylab = "Nº predictores seleccionados",
+     main = "Camino de regularización — LASSO para la mejora de la distancia recorrida (6MWT)",
+     col = "steelblue", lwd = 2, ylim = c(0, max(rejilla_lambda$n_vars)+1))
+abline(v = log(lambda_min), col = "blue", lty = 2)
+text(x = log(lambda_min), y = max(rejilla_lambda$n_vars)*0.85,
+     labels = paste0("k = ", nvars_min), col = "blue", adj = c(1.15,0.5), cex = 0.9, font = 2)
+par(new = TRUE)
+plot(rejilla_lambda$log_lambda, rejilla_lambda$error_cv, type = "l",
+     axes = FALSE, xlab = "", ylab = "", col = "firebrick", lwd = 2)
+axis(side = 4, col = "firebrick", col.axis = "firebrick")
+mtext("Error CV (tasa de error)", side = 4, line = 3, col = "firebrick")
+abline(v = log(lambda_min), col = "blue", lty = 2)
+legend("topright", legend = c("Nº predictores","Error CV","lambda.min"),
+       col = c("steelblue","firebrick","blue"), lty = c(1,1,2), lwd = c(2,2,1), bty = "n")
+par(mar = c(5,4,4,2)+0.1)
+
+# Variables seleccionadas con lambda.min
+coefs_min <- coef(fit_lasso, s = lambda_min)
+vars_lasso_min <- rownames(coefs_min)[as.vector(coefs_min) != 0 &
+                                      rownames(coefs_min) != "(Intercept)"]
+cat("Variables seleccionadas con lambda.min:", paste(vars_lasso_min, collapse=", "), "\n")
+```
+
+### Evaluación LOOCV con lambda.min
+
+```{r lasso-loocv-mejora}
+n_orig <- nrow(df_lasso_original)
+n_rose <- nrow(df_lasso_rose)
+
+probs_lasso <- numeric(n_orig)
+pred_lasso  <- character(n_orig)
+
+for (i in seq_len(n_orig)) {
+  idx_train <- if (i <= n_rose) -i else seq_len(n_rose)
+
+  mod_i <- tryCatch(
+    glmnet(X_rose[idx_train, , drop=FALSE],
+           y_rose[idx_train],
+           alpha=1, family="binomial", lambda=lambda_min),
+    error = function(e) NULL)
+
+  if (is.null(mod_i)) { probs_lasso[i] <- NA; pred_lasso[i] <- NA; next }
+
+  probs_lasso[i] <- predict(mod_i, X_original[i, , drop=FALSE], type="response")[1]
+  pred_lasso[i]  <- ifelse(probs_lasso[i] > 0.5, "1", "0")
+}
+```
+
+### Resultados LASSO
+
+```{r lasso-resultados-mejora}
+obs_lasso   <- as.character(df_lasso_original$mejora_6mwt)
+valid_idx   <- !is.na(pred_lasso) & !is.na(probs_lasso)
+
+conf_mat_lasso <- table(Observado = obs_lasso[valid_idx],
+                        Predicho  = pred_lasso[valid_idx])
+
+TP <- conf_mat_lasso["1","1"]; FN <- conf_mat_lasso["1","0"]
+TN <- conf_mat_lasso["0","0"]; FP <- conf_mat_lasso["0","1"]
+
+accuracy_lasso  <- round((TP+TN)/sum(conf_mat_lasso), 3)
+sens_lasso      <- round(TP/(TP+FN), 3)
+spec_lasso      <- round(TN/(TN+FP), 3)
+bal_acc_lasso   <- round((sens_lasso+spec_lasso)/2, 3)
+
+auc_lasso     <- tryCatch(
+  pROC::roc(obs_lasso[valid_idx], probs_lasso[valid_idx],
+            quiet=TRUE, direction="<"),
+  error=function(e) NULL)
+auc_lasso_val <- if (!is.null(auc_lasso)) round(as.numeric(auc_lasso$auc),3) else NA
+
+# Variables y coeficientes seleccionados
+cat("LASSO — Modelo con lambda.min\n")
+cat("Lambda:", round(lambda_min,5), "| Nº variables:", nvars_min, "\n")
+cat("Variables seleccionadas:", paste(vars_lasso_min, collapse=", "), "\n\n")
+
+# Tabla de coeficientes y coeficientes estadarizados
+betas_lasso     <- as.vector(coefs_min)[match(vars_lasso_min, rownames(coefs_min))]
+sds_lasso       <- sapply(vars_lasso_min, function(v) {
+  if (v %in% names(df_lasso_original)) sd(df_lasso_original[[v]], na.rm = TRUE) else NA
+})
+betas_std_lasso <- round(betas_lasso * sds_lasso, 4)
+
+coefs_df <- data.frame(
+  Variable               = vars_lasso_min,
+  Coeficiente            = round(betas_lasso, 4),
+  `Coef. estandarizado`  = betas_std_lasso,
+  check.names = FALSE
+)
+coefs_df %>%
+  kable(caption = "Coeficientes LASSO con lambda.min — mejora_6mwt",
+        align = c("l","c")) %>%
+  kable_styling(bootstrap_options=c("striped","condensed"), full_width=FALSE) %>%
+  row_spec(0, bold=TRUE, background="#2C3E50", color="white")
+
+# Matriz de confusión
+as.data.frame.matrix(conf_mat_lasso) %>%
+  tibble::rownames_to_column("Observado") %>%
+  kable(caption="Matriz de confusión LOOCV — LASSO", align="c") %>%
+  kable_styling(bootstrap_options=c("striped","condensed"), full_width=FALSE) %>%
+  row_spec(0, bold=TRUE, background="#2C3E50", color="white")
+
+# Curva ROC
+if (!is.null(auc_lasso))
+  plot(auc_lasso, main=paste0("Curva ROC — LASSO para la mejora de la distancia recorrida (6MWT) | AUC = ", auc_lasso_val))
+
+# Tabla de métricas
+data.frame(
+  Métrica = c("Accuracy","Balanced Accuracy","Sensibilidad","Especificidad","AUC"),
+  Valor   = c(accuracy_lasso, bal_acc_lasso, sens_lasso, spec_lasso, auc_lasso_val)
+) %>%
+  kable(caption="Rendimiento LOOCV — LASSO (mejora 6MWT)",
+        align=c("l","c")) %>%
+  kable_styling(bootstrap_options=c("striped","condensed"), full_width=FALSE) %>%
+  row_spec(0, bold=TRUE, background="#2C3E50", color="white") %>%
+  row_spec(2, bold=TRUE, background="#D6EAF8")
+```
+
+***
+
+## Modelo 4: Random Forest
+
+### Preparación de datos
+```{r rf-prep-mejora}
+df_rf_6mwt <- datos %>%
+  dplyr::select(dplyr::all_of(c("mejora_6mwt", vars_candidatas_6mwt))) %>%
+  filter(!is.na(mejora_6mwt))
+
+vars_factor_rf6 <- intersect(c("grupo","sexo_participante","tipo","estadio"), names(df_rf_6mwt))
+
+df_rf_6mwt <- df_rf_6mwt %>%
+  mutate(across(all_of(vars_factor_rf6), as.factor)) %>%
+  mutate(across(-c(mejora_6mwt, all_of(vars_factor_rf6)),
+                ~ as.numeric(gsub(",",".",as.character(.)))))
+
+vars_num_rf6 <- setdiff(names(df_rf_6mwt)[sapply(df_rf_6mwt, is.numeric)], "mejora_6mwt")
+for (v in vars_num_rf6)    df_rf_6mwt[[v]][is.na(df_rf_6mwt[[v]])] <- median(df_rf_6mwt[[v]], na.rm=TRUE)
+for (v in vars_factor_rf6) df_rf_6mwt[[v]][is.na(df_rf_6mwt[[v]])] <- moda(df_rf_6mwt[[v]])
+
+df_rf_6mwt          <- df_rf_6mwt %>% droplevels()
+df_rf_6mwt_original <- df_rf_6mwt
+df_rf_6mwt_original$mejora_6mwt <- factor(df_rf_6mwt_original$mejora_6mwt, levels = c(0, 1))
+```
+
+### Balanceo de clases con ROSE
+```{r rf-rose-mejora}
+set.seed(199)
+df_rf_6mwt_rose <- ROSE(mejora_6mwt ~ ., data = df_rf_6mwt,
+                         N = 20, p = 0.5,
+                         hmult.majo = 0.5, hmult.mino = 0.5)$data
+
+# Ninguna variable numérica puede ser negativa
+vars_num_rose <- names(df_rf_6mwt_rose)[sapply(df_rf_6mwt_rose, is.numeric)]
+df_rf_6mwt_rose[vars_num_rose] <- lapply(df_rf_6mwt_rose[vars_num_rose], function(x) pmax(x, 0))
+
+table(df_rf_6mwt_rose$mejora_6mwt)
+df_rf_6mwt_rose$mejora_6mwt <- factor(df_rf_6mwt_rose$mejora_6mwt, levels = c(0, 1))
+```
+
+### LOOCV 
+```{r rf-loocv-mejora}
+# Función métricas
+metricas_bin <- function(obs, pred) {
+  lvls <- c("0","1")
+  cm   <- table(factor(obs, levels=lvls), factor(pred, levels=lvls))
+  TP <- cm["1","1"]; FN <- cm["1","0"]
+  TN <- cm["0","0"]; FP <- cm["0","1"]
+  TPR <- if ((TP+FN)>0) TP/(TP+FN) else NA
+  TNR <- if ((TN+FP)>0) TN/(TN+FP) else NA
+  BA  <- if (!is.na(TPR) && !is.na(TNR)) (TPR+TNR)/2 else NA
+  list(TPR=TPR, TNR=TNR, BA=BA, cm=cm)
+}
+ntree_vals  <- c(25, 50, 75)
+mtry_vals   <- c(3, 5)
+nodesize_rf <- 3
+n_orig_rf   <- nrow(df_rf_6mwt_original)
+n_rose_rf   <- nrow(df_rf_6mwt_rose)
+resultados_rf <- list()
+
+set.seed(123)
+for (nt in ntree_vals) {
+  for (mt in mtry_vals) {
+    mt_safe <- min(mt, ncol(df_rf_6mwt_rose) - 1)
+    probs_t <- numeric(n_orig_rf)
+    pred_t  <- character(n_orig_rf)
+
+    for (i in seq_len(n_orig_rf)) {
+      idx_train <- if (i <= n_rose_rf) -i else seq_len(n_rose_rf)
+      train <- df_rf_6mwt_rose[idx_train, ]
+      test  <- df_rf_6mwt_original[i, , drop = FALSE]
+
+      if (length(unique(train$mejora_6mwt)) < 2) {
+        pred_t[i] <- NA; probs_t[i] <- NA; next
+      }
+
+      mod_i <- tryCatch(
+        randomForest(mejora_6mwt ~ ., data = train,
+                     ntree = nt, mtry = mt_safe,
+                     nodesize = nodesize_rf, importance = FALSE),
+        error = function(e) NULL)
+
+      if (is.null(mod_i)) { pred_t[i] <- NA; probs_t[i] <- NA; next }
+
+      pred_t[i]  <- as.character(predict(mod_i, test, type = "class"))
+      probs_t[i] <- predict(mod_i, test, type = "prob")[, "1"]
+    }
+
+    obs_t <- as.character(df_rf_6mwt_original$mejora_6mwt)
+    m     <- metricas_bin(obs_t, pred_t)
+    key   <- paste0("ntree", nt, "_mtry", mt)
+
+    resultados_rf[[key]] <- list(
+      ntree    = nt, mtry     = mt,
+      BA       = m$BA, TPR    = m$TPR, TNR      = m$TNR,
+      accuracy = mean(pred_t == obs_t, na.rm = TRUE),
+      probs    = probs_t, pred = pred_t, cm       = m$cm
+    )
+  }
+}
+```
+
+### Resultados Random Forest
+```{r rf-resultados-mejora}
+# Tabla comparativa
+tabla_rf_comp <- data.frame(
+  ntree        = sapply(resultados_rf, `[[`, "ntree"),
+  mtry         = sapply(resultados_rf, `[[`, "mtry"),
+  Accuracy     = round(sapply(resultados_rf, `[[`, "accuracy"), 3),
+  Balanced_Acc = round(sapply(resultados_rf, `[[`, "BA"), 3),
+  TPR_Sensib   = round(sapply(resultados_rf, `[[`, "TPR"), 3),
+  TNR_Especif  = round(sapply(resultados_rf, `[[`, "TNR"), 3)
+)
+
+kable(tabla_rf_comp,
+      caption = "Comparación de combinaciones Random Forest — mejora_6mwt)",
+      align   = c("c","c","c","c","c","c")) %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"), full_width = FALSE) %>%
+  column_spec(1:2, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, background = "#2C3E50", color = "white")
+
+# Mejor combinación
+best_rf_idx <- which.max(sapply(resultados_rf, `[[`, "BA"))
+best_rf     <- resultados_rf[[best_rf_idx]]
+
+cat("Random Forest — Mejor combinación\n")
+cat("ntree =", best_rf$ntree, "| mtry =", best_rf$mtry,
+    "| nodesize =", nodesize_rf, "\n")
+cat("Balanced Accuracy:", round(best_rf$BA,  3),
+    "| TPR:", round(best_rf$TPR, 3),
+    "| TNR:", round(best_rf$TNR, 3), "\n")
+
+# Tabla comparativa final
+pred_rf6     <- best_rf$pred
+probs_rf6    <- best_rf$probs
+obs_rf6      <- as.character(df_rf_6mwt_original$mejora_6mwt)
+accuracy_rf6 <- best_rf$accuracy
+BA_rf6       <- best_rf$BA
+TPR_rf6      <- best_rf$TPR
+TNR_rf6      <- best_rf$TNR
+
+auc_rf6     <- tryCatch(
+  pROC::roc(df_rf_6mwt_original$mejora_6mwt, probs_rf6,
+            quiet = TRUE, direction = "<"),
+  error = function(e) NULL)
+auc_rf6_val <- if (!is.null(auc_rf6)) round(as.numeric(auc_rf6$auc), 3) else NA
+
+# Matriz de confusión
+as.data.frame.matrix(best_rf$cm) %>%
+  tibble::rownames_to_column("Observado") %>%
+  kable(caption = "Matriz de confusión LOOCV — Random Forest (mejor combinación)",
+        align = "c") %>%
+  kable_styling(bootstrap_options = c("striped","condensed"), full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#2C3E50", color = "white")
+
+# Curva ROC
+if (!is.null(auc_rf6))
+  plot(auc_rf6, main = paste0("Curva ROC – Random Forest para la mejora de la distancia recorrida (6MWT) | AUC = ", auc_rf6_val))
+
+# Tabla métricas
+data.frame(
+  Métrica = c("Accuracy","Balanced Accuracy","Sensibilidad","Especificidad","AUC"),
+  Valor   = c(accuracy_rf6, BA_rf6, TPR_rf6, TNR_rf6, auc_rf6_val)
+) %>%
+  kable(caption = "Rendimiento LOOCV — Random Forest (mejora 6MWT)",
+        align = c("l","c")) %>%
+  kable_styling(bootstrap_options = c("striped","condensed"), full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#2C3E50", color = "white") %>%
+  row_spec(2, bold = TRUE, background = "#D6EAF8")
+```
+
+### Importancia de variables
+```{r importancia_rf_mejora}
+if (length(unique(df_rf_6mwt_rose$mejora_6mwt)) >= 2) {
+  mt_safe_full    <- min(best_rf$mtry, ncol(df_rf_6mwt_rose) - 1)
+  modelo_rf6_full <- randomForest(mejora_6mwt ~ ., data = df_rf_6mwt_rose,
+                                   ntree = best_rf$ntree, mtry = mt_safe_full,
+                                   nodesize = nodesize_rf, importance = TRUE)
+  imp6_df <- data.frame(
+    Variable         = rownames(importance(modelo_rf6_full)),
+    MeanDecreaseGini = round(importance(modelo_rf6_full)[,"MeanDecreaseGini"], 3)
+  ) %>% arrange(desc(MeanDecreaseGini))
+
+  cat("\nImportancia de variables:\n")
+  print(imp6_df, row.names = FALSE)
+
+  varImpPlot(modelo_rf6_full,
+    main = paste0("Importancia de variables Random Forest para la mejora de la distancia
+recorrida (6MWT)"))
+}
+```
+
+***
+
+# PARTE III: Modelos Predictivos — clasificación de estadio
+
+
+```{r estadio-prep}
+# Crear estadio_bin
+datos_est <- read_excel(ruta_excel, sheet = "Congreso") %>%
+  mutate(estadio_bin = case_when(
+    estadio %in% c("Estadio IVB", "Estadio IVA")                  ~ "IV",
+    estadio %in% c("Estadio IIIC", "Estadio IIIA", "Estadio IIIB") ~ "III",
+    TRUE ~ NA_character_
+  )) %>%
+  mutate(estadio_bin = as.factor(estadio_bin)) %>%
+  mutate(across(where(is.character), ~ suppressWarnings(as.numeric(gsub(",", ".", .)))))
+
+cat("Distribución estadio_bin:\n")
+print(table(datos_est$estadio_bin, useNA = "always"))
+
+# Seleccionar solo variables _hemato y _bio en T0
+vars_hemato_bio <- names(datos_est)[grepl("_hemato$|_bio$", names(datos_est))]
+cat("\nVariables encontradas:", length(vars_hemato_bio), "\n")
+
+# Dataframe
+df_est <- datos_est %>%
+  dplyr::select(dplyr::all_of(c("estadio_bin", vars_hemato_bio))) %>%
+  filter(!is.na(estadio_bin))
+
+for (v in vars_hemato_bio) {
+  df_est[[v]] <- suppressWarnings(as.numeric(gsub(",", ".", as.character(df_est[[v]]))))
+  df_est[[v]][is.na(df_est[[v]])] <- median(df_est[[v]], na.rm = TRUE)
+}
+df_est <- df_est %>% droplevels()
+cat("Observaciones con estadio válido:", nrow(df_est), "\n")
+```
+
+***
+
+## Modelo 1: Regresión logística forward stepwise — estadio
+
+### Análisis univariante
+
+```{r estadio-logistica-uni}
+resultados_uni_est <- lapply(vars_hemato_bio, function(var) {
+  df <- df_est %>% dplyr::select(estadio_bin, dplyr::all_of(var)) %>% na.omit()
+  if (nrow(df) <= 5) return(NULL)
+  modelo <- tryCatch(
+    glm(as.formula(paste("estadio_bin ~", var)), data = df, family = binomial),
+    error = function(e) NULL)
+  if (is.null(modelo)) return(NULL)
+  p_global <- tryCatch(drop1(modelo, test = "Chisq")[2, "Pr(>Chi)"], error = function(e) NA)
+  data.frame(variable = var, n = nrow(df), p_value = p_global, stringsAsFactors = FALSE)
+})
+resultados_uni_est <- do.call(rbind, resultados_uni_est) %>%
+  filter(!is.na(p_value)) %>%
+  arrange(p_value)
+cat(" Univariante logístico (estadio)\n")
+print(resultados_uni_est)
+vars_forward_est <- resultados_uni_est %>% filter(p_value < 0.10) %>% pull(variable)
+cat("\nVariables seleccionadas (p<0.10):", length(vars_forward_est), "\n")
+
+# Tabla univariante
+resultados_uni_est %>%
+  filter(p_value < 0.10) %>%
+  mutate(p_value = round(p_value, 4)) %>%
+  dplyr::select(
+    Variable  = variable,
+    N         = n,
+    `p-valor` = p_value
+  ) %>%
+  kable(caption = "Variables seleccionadas en el univariante (p < 0.10) — Regresión logística forward (estadio)",
+        align = c("l","c","r")) %>%
+  kable_styling(bootstrap_options = c("striped","condensed"), full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#2C3E50", color = "white") %>%
+  row_spec(seq_len(nrow(filter(resultados_uni_est, p_value < 0.10))),
+           background = "#D6EAF8", bold = TRUE)
+```
+
+### Modelo multivariante forward stepwise
+
+```{r estadio-logistica-df}
+df_fw_est <- df_est %>%
+  dplyr::select(dplyr::all_of(c("estadio_bin", vars_forward_est))) %>%
+  droplevels()
+df_fw_est_original <- df_fw_est
+```
+
+```{r estadio-logistica-rose}
+set.seed(199)
+rose_fw_est <- ROSE(estadio_bin ~ ., data = df_fw_est_original,
+                    N = 20, p = 0.5,
+                    hmult.majo = 0.5, hmult.mino = 0.5)$data
+
+# Ninguna variable numérica puede ser negativa
+vars_num_rose <- names(rose_fw_est)[sapply(rose_fw_est, is.numeric)]
+rose_fw_est[vars_num_rose] <- lapply(rose_fw_est[vars_num_rose], function(x) pmax(x, 0))
+
+rose_fw_est$estadio_bin <- factor(rose_fw_est$estadio_bin, levels = c("III", "IV"))
+df_fw_est <- rose_fw_est
+cat("Distribución ROSE:\n")
+table(df_fw_est$estadio_bin)
+```
+
+```{r estadio-logistica-forward}
+modelo_nulo_est  <- glm(estadio_bin ~ 1, data = df_fw_est, family = binomial)
+formula_comp_est <- as.formula(paste("estadio_bin ~", paste(vars_forward_est, collapse = " + ")))
+modelo_comp_est  <- tryCatch(glm(formula_comp_est, data = df_fw_est, family = binomial),
+                              error = function(e) { message(e$message); NULL })
+if (!is.null(modelo_comp_est)) {
+  modelo_fw_est <- step(modelo_nulo_est,
+                        scope = list(lower = modelo_nulo_est, upper = modelo_comp_est),
+                        direction = "forward", trace = TRUE)
+  cat("Modelo regresión logísitica forward — estadio III vs IV\n")
+  print(summary(modelo_fw_est))
+  coefs_fw_est <- summary(modelo_fw_est)$coefficients
+  coefs_fw_est <- coefs_fw_est[rownames(coefs_fw_est) != "(Intercept)", , drop = FALSE]
+  if (nrow(coefs_fw_est) > 0) {
+    ic_fw_est <- tryCatch(confint(modelo_fw_est), error = function(e) NULL)
+    if (!is.null(ic_fw_est))
+      ic_fw_est <- ic_fw_est[rownames(ic_fw_est) != "(Intercept)", , drop = FALSE]
+    tabla_fw_est <- data.frame(
+      Variable  = rownames(coefs_fw_est),
+      OR        = round(exp(coefs_fw_est[, "Estimate"]), 3),
+      IC95_inf  = if (!is.null(ic_fw_est)) round(exp(ic_fw_est[, 1]), 3) else NA,
+      IC95_sup  = if (!is.null(ic_fw_est)) round(exp(ic_fw_est[, 2]), 3) else NA,
+      p_value   = round(coefs_fw_est[, "Pr(>|z|)"], 4),
+      row.names = NULL
+    )
+    # Coeficientes estandarizados (opcional, variables ya en escala 0-100)
+sds_fw_est <- sapply(tabla_fw_est$Variable, function(v) {
+  if (v %in% names(df_fw_est_original)) sd(df_fw_est_original[[v]], na.rm = TRUE) else NA
+})
+betas_raw_est <- coefs_fw_est[tabla_fw_est$Variable, "Estimate"]
+tabla_fw_est$beta_std <- round(betas_raw_est * sds_fw_est, 3)
+    cat("OR e IC95% del modelo forward (estadio)\n")
+    print(tabla_fw_est)
+    cat("\nAIC:", round(AIC(modelo_fw_est), 2), "\n")
+  } else {
+    cat("El forward no añadió ninguna variable.\n")
+  }
+} else {
+  modelo_fw_est <- modelo_nulo_est
+  cat("No se pudo ajustar el modelo completo; se usa el modelo nulo.\n")
+}
+# Tabla OR formateada
+if (exists("tabla_fw_est") && nrow(tabla_fw_est) > 0) {
+  tabla_fw_est %>%
+    mutate(
+      OR_fmt = formatC(OR, format = "e", digits = 2),
+      Sig    = case_when(
+        p_value < 0.001 ~ "***",
+        p_value < 0.01  ~ "**",
+        p_value < 0.05  ~ "*",
+        p_value < 0.10  ~ "·",
+        TRUE ~ ""
+      )
+    ) %>%
+    dplyr::select(Variable, `OR` = OR_fmt, `β estandarizado` = beta_std, `p-valor` = p_value, ` ` = Sig) %>%
+    kable(caption = "Modelo regresión logística forward — Odds Ratios (estadio)",
+          align = c("l","c","r","c")) %>%
+    kable_styling(bootstrap_options = c("striped","condensed"), full_width = FALSE) %>%
+    row_spec(0, bold = TRUE, background = "#2C3E50", color = "white") %>%
+    footnote(general = "· p<0.10  * p<0.05  ** p<0.01  *** p<0.001", general_title = "")
+}
+```
+
+### Evaluación LOOCV
+```{r estadio-logistica-loocv}
+if (length(vars_forward_est) == 0 || is.null(modelo_comp_est)) {
+  cat("No hay modelo. Se omite LOOCV.\n")
+} else {
+  n_fw_est      <- nrow(df_fw_est_original)
+  n_rose_fw_est <- nrow(df_fw_est)
+  probs_fw_est  <- numeric(n_fw_est)
+  pred_fw_est   <- character(n_fw_est)
+
+  for (i in seq_len(n_fw_est)) {
+    idx_train <- if (i <= n_rose_fw_est) -i else seq_len(n_rose_fw_est)
+    train_i   <- df_fw_est[idx_train, ]
+    test_i    <- df_fw_est_original[i, , drop = FALSE]
+    mod_i <- tryCatch(
+      step(glm(estadio_bin ~ 1, data = train_i, family = binomial),
+           scope = list(lower = glm(estadio_bin ~ 1, data = train_i, family = binomial),
+                        upper = glm(formula_comp_est, data = train_i, family = binomial)),
+           direction = "forward", trace = FALSE),
+      error = function(e) NULL)
+    if (is.null(mod_i)) { probs_fw_est[i] <- NA; pred_fw_est[i] <- NA; next }
+    probs_fw_est[i] <- predict(mod_i, test_i, type = "response")
+    pred_fw_est[i]  <- ifelse(probs_fw_est[i] > 0.5, "IV", "III")
+  }
+
+  obs_fw_est      <- as.character(df_fw_est_original$estadio_bin)
+  valid_idx       <- !is.na(pred_fw_est)
+  conf_mat_fw_est <- table(Observado = obs_fw_est[valid_idx],
+                           Predicho  = pred_fw_est[valid_idx])
+  auc_fw_est      <- tryCatch(pROC::roc(df_fw_est_original$estadio_bin,
+                                         probs_fw_est,
+                                         quiet = TRUE, levels = c("III","IV"),
+                                         direction = "<"),
+                               error = function(e) NULL)
+  auc_fw_est_val  <- if (!is.null(auc_fw_est)) round(as.numeric(auc_fw_est$auc), 3) else NA
+
+  TP <- conf_mat_fw_est["IV","IV"]; TN <- conf_mat_fw_est["III","III"]
+  FP <- conf_mat_fw_est["III","IV"]; FN <- conf_mat_fw_est["IV","III"]
+  accuracy_fw_est  <- round((TP + TN) / sum(conf_mat_fw_est), 3)
+  sens_fw_est      <- round(TP / (TP + FN), 3)
+  spec_fw_est      <- round(TN / (TN + FP), 3)
+  bal_acc_fw_est   <- round((sens_fw_est + spec_fw_est) / 2, 3)
+
+  as.data.frame.matrix(conf_mat_fw_est) %>%
+    tibble::rownames_to_column("Observado") %>%
+    kable(caption = "Matriz de confusión LOOCV — regresión logística forward (estadio)",
+          align = "c") %>%
+    kable_styling(bootstrap_options = c("striped","condensed"), full_width = FALSE) %>%
+    row_spec(0, bold = TRUE, background = "#2C3E50", color = "white")
+
+  if (!is.null(auc_fw_est))
+    plot(auc_fw_est, main = paste0("Curva ROC — regresión logística forward para el estadio tumoral | AUC = ", auc_fw_est_val))
+
+  data.frame(
+    Métrica = c("Accuracy","Balanced Accuracy","Sensibilidad","Especificidad","AUC"),
+    Valor   = c(accuracy_fw_est, bal_acc_fw_est, sens_fw_est, spec_fw_est, auc_fw_est_val)
+  ) %>%
+    kable(caption = "Rendimiento LOOCV — Regresión logística forward (estadio)",
+          align = c("l","c")) %>%
+    kable_styling(bootstrap_options = c("striped","condensed"), full_width = FALSE) %>%
+    row_spec(0, bold = TRUE, background = "#2C3E50", color = "white") %>%
+    row_spec(2, bold = TRUE, background = "#D6EAF8")
+}
+```
+
+***
+
+## Modelo 2: Naive Bayes — estadio
+
+### Filtro univariante y selección de variables
+
+```{r estadio-nb-uni}
+resultados_uni_nb_est <- lapply(vars_hemato_bio, function(var) {
+  df <- df_est %>%
+    dplyr::select(estadio_bin, dplyr::all_of(var)) %>% na.omit()
+  if (nrow(df) <= 5) return(NULL)
+  if (length(unique(df$estadio_bin)) < 2) return(NULL)
+  g_iii <- df[[var]][df$estadio_bin == "III"]
+  g_iv  <- df[[var]][df$estadio_bin == "IV"]
+  p <- tryCatch(wilcox.test(g_iii, g_iv, exact = FALSE)$p.value, error = function(e) NA)
+  data.frame(variable = var, n = nrow(df), test = "Wilcoxon",
+             p_value = round(p, 4), stringsAsFactors = FALSE)
+}) %>% do.call(rbind, .) %>% filter(!is.na(p_value)) %>% arrange(p_value)
+
+cat("Filtro univariante Wilcoxon (estadio)\n")
+print(resultados_uni_nb_est)
+
+vars_nb_est <- resultados_uni_nb_est %>% filter(p_value < 0.10) %>% pull(variable)
+cat("\nVariables seleccionadas (p<0.10):", length(vars_nb_est), "\n")
+
+resultados_uni_nb_est %>%
+  filter(p_value < 0.10) %>%
+  mutate(
+    p_value = round(p_value, 4),
+    Sig = case_when(
+      p_value < 0.001 ~ "***", p_value < 0.01 ~ "**",
+      p_value < 0.05  ~ "*",   p_value < 0.10 ~ "·", TRUE ~ ""
+    )
+  ) %>%
+  dplyr::select(Variable = variable, N = n, Test = test, `p-valor` = p_value, ` ` = Sig) %>%
+  kable(caption = "Variables seleccionadas en el filtro univariante (p < 0.10) — Naive Bayes estadio",
+        align = c("l","c","c","r","c")) %>%
+  kable_styling(bootstrap_options = c("striped","condensed"), full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#2C3E50", color = "white") %>%
+  footnote(general = "· p<0.10  * p<0.05  ** p<0.01  *** p<0.001", general_title = "")
+```
+
+### Preparación de datos
+
+```{r estadio-nb-df}
+if (length(vars_nb_est) > 0) {
+  df_nb_est <- df_est %>%
+    dplyr::select(dplyr::all_of(c("estadio_bin", vars_nb_est))) %>%
+    mutate(across(-estadio_bin,
+                  ~ suppressWarnings(as.numeric(gsub(",", ".", as.character(.)))))) %>%
+    mutate(estadio_bin = factor(estadio_bin, levels = c("III", "IV"))) %>%
+    droplevels()
+
+  vars_num_nb_est <- setdiff(names(df_nb_est)[sapply(df_nb_est, is.numeric)], "estadio_bin")
+  for (v in vars_num_nb_est)
+    df_nb_est[[v]][is.na(df_nb_est[[v]])] <- median(df_nb_est[[v]], na.rm = TRUE)
+
+  df_nb_est_original <- df_nb_est
+}
+```
+
+### Balanceo de clases con ROSE
+```{r rose-nb-estadio}
+set.seed(199)
+rose_nb_est <- ROSE(estadio_bin ~ ., data = df_nb_est_original,
+                    N = 20, p = 0.5,
+                    hmult.majo = 0.5, hmult.mino = 0.5)$data
+
+# Ninguna variable numérica puede ser negativa
+vars_num_rose <- names(rose_nb_est)[sapply(rose_nb_est, is.numeric)]
+rose_nb_est[vars_num_rose] <- lapply(rose_nb_est[vars_num_rose], function(x) pmax(x, 0))
+
+rose_nb_est$estadio_bin <- factor(rose_nb_est$estadio_bin, levels = c("III", "IV"))
+df_nb_est <- rose_nb_est
+cat("Distribución ROSE:\n")
+table(df_nb_est$estadio_bin)
+```
+
+### Modelo Naive Bayes
+
+```{r estadio-nb-modelo}
+if (length(vars_nb_est) == 0) {
+  cat("No hay variables seleccionadas. No se ajusta modelo Naive Bayes.\n")
+} else {
+  modelo_nb_est <- e1071::naiveBayes(estadio_bin ~ ., data = df_nb_est)
+  cat("Naive Bayes — estadio III vs IV\n")
+  cat("Variables incluidas:", length(vars_nb_est), "\n")
+  print(modelo_nb_est) }
+
+```
+
+### Evaluación LOOCV
+
+```{r estadio-nb-loocv}
+if (length(vars_nb_est) == 0) {
+  cat("No hay modelo. Se omite LOOCV.\n")
+} else {
+  n_nb_est      <- nrow(df_nb_est_original)
+  n_rose_nb_est <- nrow(df_nb_est)
+  probs_nb_est  <- numeric(n_nb_est)
+  pred_nb_est   <- character(n_nb_est)
+
+  for (i in seq_len(n_nb_est)) {
+    idx_train <- if (i <= n_rose_nb_est) -i else seq_len(n_rose_nb_est)
+    train <- df_nb_est[idx_train, ]
+    test  <- df_nb_est_original[i, , drop = FALSE]
+
+    if (length(unique(train$estadio_bin)) < 2) {
+      probs_nb_est[i] <- NA; pred_nb_est[i] <- NA; next
+    }
+    mod_i <- tryCatch(e1071::naiveBayes(estadio_bin ~ ., data = train),
+                      error = function(e) NULL)
+    if (is.null(mod_i)) { probs_nb_est[i] <- NA; pred_nb_est[i] <- NA; next }
+
+    raw_i           <- predict(mod_i, test, type = "raw")
+    probs_nb_est[i] <- raw_i[, "IV"]
+    pred_nb_est[i]  <- as.character(predict(mod_i, test, type = "class"))
+  }
+
+  obs_nb_est  <- factor(df_nb_est_original$estadio_bin, levels = c("III","IV"))
+  pred_nb_est <- factor(pred_nb_est, levels = c("III","IV"))
+  valid_idx   <- !is.na(pred_nb_est) & !is.na(probs_nb_est)
+
+  conf_mat_nb_est <- table(Observado = obs_nb_est[valid_idx],
+                           Predicho  = pred_nb_est[valid_idx])
+
+  TP <- ifelse("IV"  %in% rownames(conf_mat_nb_est) & "IV"  %in% colnames(conf_mat_nb_est), conf_mat_nb_est["IV","IV"],   0)
+  TN <- ifelse("III" %in% rownames(conf_mat_nb_est) & "III" %in% colnames(conf_mat_nb_est), conf_mat_nb_est["III","III"], 0)
+  FP <- ifelse("III" %in% rownames(conf_mat_nb_est) & "IV"  %in% colnames(conf_mat_nb_est), conf_mat_nb_est["III","IV"],  0)
+  FN <- ifelse("IV"  %in% rownames(conf_mat_nb_est) & "III" %in% colnames(conf_mat_nb_est), conf_mat_nb_est["IV","III"],  0)
+
+  accuracy_nb_est  <- round((TP+TN)/sum(conf_mat_nb_est), 3)
+  sens_nb_est      <- round(TP/(TP+FN), 3)
+  spec_nb_est      <- round(TN/(TN+FP), 3)
+  bal_acc_nb_est   <- round((sens_nb_est+spec_nb_est)/2, 3)
+
+  auc_nb_est <- tryCatch(
+    pROC::roc(response = obs_nb_est[valid_idx], predictor = probs_nb_est[valid_idx],
+              levels = c("III","IV"), direction = "<", quiet = TRUE),
+    error = function(e) NULL)
+  auc_nb_est_val <- if (!is.null(auc_nb_est)) round(as.numeric(auc_nb_est$auc), 3) else NA
+
+  as.data.frame.matrix(conf_mat_nb_est) %>%
+    tibble::rownames_to_column("Observado") %>%
+    kable(caption = "Matriz de confusión LOOCV — Naive Bayes estadio", align = "c") %>%
+    kable_styling(bootstrap_options = c("striped","condensed"), full_width = FALSE) %>%
+    row_spec(0, bold = TRUE, background = "#2C3E50", color = "white")
+
+  if (!is.null(auc_nb_est))
+    plot(auc_nb_est, main = paste0("Curva ROC — Naive Bayes para el estadio tumoral | AUC = ", auc_nb_est_val))
+
+  data.frame(
+    Métrica = c("Accuracy","Balanced Accuracy","Sensibilidad","Especificidad","AUC"),
+    Valor   = c(accuracy_nb_est, bal_acc_nb_est, sens_nb_est, spec_nb_est, auc_nb_est_val)
+  ) %>%
+    kable(caption = "Rendimiento LOOCV — Naive Bayes estadio",
+          align = c("l","c")) %>%
+    kable_styling(bootstrap_options = c("striped","condensed"), full_width = FALSE) %>%
+    row_spec(0, bold = TRUE, background = "#2C3E50", color = "white") %>%
+    row_spec(2, bold = TRUE, background = "#D6EAF8")
+}
+```
+
+***
+
+## Modelo 3: LASSO — estadio
+
+### Preparación de datos
+
+```{r estadio-lasso}
+df_lasso_est          <- df_est
+df_lasso_est_original <- df_est
+
+formula_lasso_est <- as.formula(paste("estadio_bin ~", paste(vars_hemato_bio, collapse = " + ")))
+
+X_original_est <- model.matrix(formula_lasso_est, data = df_lasso_est_original)[, -1]
+y_original_est <- ifelse(as.character(df_lasso_est_original$estadio_bin) == "IV", 1, 0)
+
+cat("Observaciones originales:", nrow(df_lasso_est_original), "\n")
+table(df_lasso_est_original$estadio_bin)
+
+```
+
+### Balanceo de clases con ROSE
+
+```{r lasso-rose-estadio}
+set.seed(199)
+df_lasso_est_rose <- ROSE(estadio_bin ~ ., data = df_lasso_est_original,
+                           N = 20, p = 0.5,
+                           hmult.majo = 0.5, hmult.mino = 0.5)$data
+
+# Ninguna variable numérica puede ser negativa
+vars_num_rose <- names(df_lasso_est_rose)[sapply(df_lasso_est_rose, is.numeric)]
+df_lasso_est_rose[vars_num_rose] <- lapply(df_lasso_est_rose[vars_num_rose], function(x) pmax(x, 0))
+
+df_lasso_est_rose$estadio_bin <- factor(df_lasso_est_rose$estadio_bin, levels = c("III","IV"))
+cat("Distribución ROSE:\n")
+table(df_lasso_est_rose$estadio_bin)
+
+X_rose_est <- model.matrix(formula_lasso_est, data = df_lasso_est_rose)[, -1]
+y_rose_est <- ifelse(as.character(df_lasso_est_rose$estadio_bin) == "IV", 1, 0)
+```
+
+### Rejilla de lambdas y gráfica
+
+```{r lasso-graficas-estadio}
+set.seed(123)
+fit_lasso_est    <- glmnet(X_rose_est, y_rose_est, alpha = 1, family = "binomial")
+fit_lasso_cv_est <- cv.glmnet(X_rose_est, y_rose_est, alpha = 1,
+                               lambda = fit_lasso_est$lambda,
+                               family = "binomial", nfolds = nrow(X_rose_est),
+                               type.measure = "class")
+rejilla_est <- data.frame(
+  lambda     = fit_lasso_est$lambda,
+  log_lambda = log(fit_lasso_est$lambda),
+  n_vars     = fit_lasso_est$df,
+  error_cv   = fit_lasso_cv_est$cvm
+)
+lambda_min_est  <- fit_lasso_cv_est$lambda.min
+nvars_min_est   <- rejilla_est$n_vars[which.min(abs(rejilla_est$lambda - lambda_min_est))]
+
+cat("lambda.min:", round(lambda_min_est, 5), "| Predictores seleccionados:", nvars_min_est, "\n")
+
+par(mar = c(5,4,4,4)+0.1)
+plot(rejilla_est$log_lambda, rejilla_est$n_vars, type = "s",
+     xlab = "log(lambda)", ylab = "Nº predictores seleccionados",
+     main = "Camino de regularización — LASSO para el estadio tumoral",
+     col = "steelblue", lwd = 2, ylim = c(0, max(rejilla_est$n_vars)+1))
+abline(v = log(lambda_min_est), col = "blue", lty = 2)
+text(x = log(lambda_min_est), y = max(rejilla_est$n_vars)*0.85,
+     labels = paste0("k = ", nvars_min_est),
+     col = "blue", adj = c(1.15,0.5), cex = 0.9, font = 2)
+par(new = TRUE)
+plot(rejilla_est$log_lambda, rejilla_est$error_cv, type = "l",
+     axes = FALSE, xlab = "", ylab = "", col = "firebrick", lwd = 2)
+axis(side = 4, col = "firebrick", col.axis = "firebrick")
+mtext("Error CV (tasa de error)", side = 4, line = 3, col = "firebrick")
+abline(v = log(lambda_min_est), col = "blue", lty = 2)
+legend("topright", legend = c("Nº predictores","Error CV","lambda.min"),
+       col = c("steelblue","firebrick","blue"), lty = c(1,1,2), lwd = c(2,2,1), bty = "n")
+par(mar = c(5,4,4,2)+0.1)
+
+# Variables seleccionadas con lambda.min
+coefs_min_est  <- coef(fit_lasso_est, s = lambda_min_est)
+vars_lasso_min_est <- rownames(coefs_min_est)[as.vector(coefs_min_est) != 0 &
+                                               rownames(coefs_min_est) != "(Intercept)"]
+cat("Variables seleccionadas con lambda.min:", paste(vars_lasso_min_est, collapse=", "), "\n")
+```
+
+### Evaluación LOOCV con lambda.min
+
+```{r lasso-loocv-estadio}
+n_orig_est <- nrow(df_lasso_est_original)
+n_rose_est <- nrow(df_lasso_est_rose)
+probs_lasso_est <- numeric(n_orig_est)
+pred_lasso_est  <- character(n_orig_est)
+
+for (i in seq_len(n_orig_est)) {
+  idx_train <- if (i <= n_rose_est) -i else seq_len(n_rose_est)
+  mod_i <- tryCatch(
+    glmnet(X_rose_est[idx_train, , drop=FALSE],
+           y_rose_est[idx_train],
+           alpha=1, family="binomial", lambda=lambda_min_est),
+    error = function(e) NULL)
+  if (is.null(mod_i)) { probs_lasso_est[i] <- NA; pred_lasso_est[i] <- NA; next }
+  probs_lasso_est[i] <- predict(mod_i, X_original_est[i, , drop=FALSE], type="response")[1]
+  pred_lasso_est[i]  <- ifelse(probs_lasso_est[i] > 0.5, "IV", "III")
+}
+```
+
+### Resultados LASSO
+
+```{r lasso-resultados-estadio}
+obs_lasso_est <- as.character(df_lasso_est_original$estadio_bin)
+valid_idx     <- !is.na(pred_lasso_est) & !is.na(probs_lasso_est)
+
+conf_mat_lasso_est <- table(Observado = obs_lasso_est[valid_idx],
+                            Predicho  = pred_lasso_est[valid_idx])
+
+TP <- conf_mat_lasso_est["IV","IV"];  FN <- conf_mat_lasso_est["IV","III"]
+TN <- conf_mat_lasso_est["III","III"]; FP <- conf_mat_lasso_est["III","IV"]
+
+accuracy_lasso_est  <- round((TP+TN)/sum(conf_mat_lasso_est), 3)
+sens_lasso_est      <- round(TP/(TP+FN), 3)
+spec_lasso_est      <- round(TN/(TN+FP), 3)
+bal_acc_lasso_est   <- round((sens_lasso_est+spec_lasso_est)/2, 3)
+
+auc_lasso_est <- tryCatch(
+  pROC::roc(obs_lasso_est[valid_idx], probs_lasso_est[valid_idx],
+            quiet=TRUE, levels=c("III","IV"), direction="<"),
+  error=function(e) NULL)
+auc_lasso_est_val <- if (!is.null(auc_lasso_est)) round(as.numeric(auc_lasso_est$auc),3) else NA
+
+cat("LASSO Estadio — lambda.min\n")
+cat("Lambda:", round(lambda_min_est,5), "| Nº variables:", nvars_min_est, "\n")
+cat("Variables seleccionadas:", paste(vars_lasso_min_est, collapse=", "), "\n\n")
+
+
+# Tabla coeficientes y coeficientes estandarizados
+betas_lasso_est     <- as.vector(coefs_min_est)[match(vars_lasso_min_est, rownames(coefs_min_est))]
+sds_lasso_est       <- sapply(vars_lasso_min_est, function(v) {
+  if (v %in% names(df_lasso_est_original)) sd(df_lasso_est_original[[v]], na.rm = TRUE) else NA
+})
+betas_std_lasso_est <- round(betas_lasso_est * sds_lasso_est, 4)
+
+data.frame(
+  Variable              = vars_lasso_min_est,
+  Coeficiente           = round(betas_lasso_est, 4),
+  `Coef. estandarizado` = betas_std_lasso_est,
+  check.names = FALSE
+) %>%
+  kable(caption = "Coeficientes LASSO con lambda.min — estadio III vs IV",
+        align = c("l","c","c")) %>%
+  kable_styling(bootstrap_options=c("striped","condensed"), full_width=FALSE) %>%
+  row_spec(0, bold=TRUE, background="#2C3E50", color="white")
+
+# Matriz de confusión
+as.data.frame.matrix(conf_mat_lasso_est) %>%
+  tibble::rownames_to_column("Observado") %>%
+  kable(caption="Matriz de confusión LOOCV — LASSO estadio", align="c") %>%
+  kable_styling(bootstrap_options=c("striped","condensed"), full_width=FALSE) %>%
+  row_spec(0, bold=TRUE, background="#2C3E50", color="white")
+
+# Curva ROC
+if (!is.null(auc_lasso_est))
+  plot(auc_lasso_est, main=paste0("Curva ROC — LASSO para el estadio tumoral | AUC = ",
+                                   auc_lasso_est_val))
+
+# Tabla métricas
+data.frame(
+  Métrica = c("Accuracy","Balanced Accuracy","Sensibilidad","Especificidad","AUC"),
+  Valor   = c(accuracy_lasso_est, bal_acc_lasso_est, sens_lasso_est,
+              spec_lasso_est, auc_lasso_est_val)
+) %>%
+  kable(caption="Rendimiento LOOCV — LASSO (estadio III vs IV)",
+        align=c("l","c")) %>%
+  kable_styling(bootstrap_options=c("striped","condensed"), full_width=FALSE) %>%
+  row_spec(0, bold=TRUE, background="#2C3E50", color="white") %>%
+  row_spec(2, bold=TRUE, background="#D6EAF8")
+```
+
+***
+
+## Modelo 4: Random forest — estadio
+
+
+### Preparación de datos
+
+```{r rf-prep-estadio}
+df_rf_est          <- df_est
+df_rf_est_original <- df_est
+df_rf_est_original$estadio_bin <- factor(df_rf_est_original$estadio_bin,
+                                          levels = c("III","IV"))
+cat("Observaciones originales:", nrow(df_rf_est_original), "\n")
+table(df_rf_est_original$estadio_bin)
+```
+
+### Balanceo de clases con ROSE
+
+```{r rf-rose-estadio}
+set.seed(199)
+df_rf_est_rose <- ROSE(estadio_bin ~ ., data = df_rf_est_original,
+                        N = 20, p = 0.5,
+                        hmult.majo = 0.5, hmult.mino = 0.5)$data
+
+# Ninguna variable numérica puede ser negativa
+vars_num_rose <- names(df_rf_est_rose)[sapply(df_rf_est_rose, is.numeric)]
+df_rf_est_rose[vars_num_rose] <- lapply(df_rf_est_rose[vars_num_rose], function(x) pmax(x, 0))
+
+df_rf_est_rose$estadio_bin <- factor(df_rf_est_rose$estadio_bin, levels = c("III","IV"))
+cat("Distribución ROSE:\n")
+table(df_rf_est_rose$estadio_bin)
+```
+
+### LOOCV
+
+```{r rf-loocv-estadio}
+# Función métricas
+metricas_bin_est <- function(obs, pred) {
+  lvls <- c("III","IV")
+  cm   <- table(factor(obs, levels=lvls), factor(pred, levels=lvls))
+  TP <- cm["IV","IV"];  FN <- cm["IV","III"]
+  TN <- cm["III","III"]; FP <- cm["III","IV"]
+  TPR <- if ((TP+FN)>0) TP/(TP+FN) else NA
+  TNR <- if ((TN+FP)>0) TN/(TN+FP) else NA
+  BA  <- if (!is.na(TPR) && !is.na(TNR)) (TPR+TNR)/2 else NA
+  list(TPR=TPR, TNR=TNR, BA=BA, cm=cm)
+}
+
+ntree_vals_est  <- c(25, 50, 75)
+mtry_vals_est   <- c(3, 5)
+nodesize_rf_est <- 3
+n_orig_rf_est   <- nrow(df_rf_est_original)
+n_rose_rf_est   <- nrow(df_rf_est_rose)
+resultados_rf_est <- list()
+
+set.seed(123)
+for (nt in ntree_vals_est) {
+  for (mt in mtry_vals_est) {
+    mt_safe <- min(mt, ncol(df_rf_est_rose) - 1)
+    probs_t <- numeric(n_orig_rf_est)
+    pred_t  <- character(n_orig_rf_est)
+    for (i in seq_len(n_orig_rf_est)) {
+      idx_train <- if (i <= n_rose_rf_est) -i else seq_len(n_rose_rf_est)
+      train <- df_rf_est_rose[idx_train, ]
+      test  <- df_rf_est_original[i, , drop = FALSE]
+      if (length(unique(train$estadio_bin)) < 2) {
+        pred_t[i] <- NA; probs_t[i] <- NA; next
+      }
+      mod_i <- tryCatch(
+        randomForest(estadio_bin ~ ., data = train,
+                     ntree = nt, mtry = mt_safe,
+                     nodesize = nodesize_rf_est, importance = FALSE),
+        error = function(e) NULL)
+      if (is.null(mod_i)) { pred_t[i] <- NA; probs_t[i] <- NA; next }
+      pred_t[i]  <- as.character(predict(mod_i, test, type = "class"))
+      probs_t[i] <- predict(mod_i, test, type = "prob")[, "IV"]
+    }
+    obs_t <- as.character(df_rf_est_original$estadio_bin)
+    m     <- metricas_bin_est(obs_t, pred_t)
+    key   <- paste0("ntree", nt, "_mtry", mt)
+    resultados_rf_est[[key]] <- list(
+      ntree    = nt, mtry     = mt,
+      BA       = m$BA, TPR    = m$TPR, TNR      = m$TNR,
+      accuracy = mean(pred_t == obs_t, na.rm = TRUE),
+      probs    = probs_t, pred = pred_t, cm       = m$cm
+    )
+  }
+}
+```
+### Resultados Random Forest
+```{r rf-resultados-estadio}
+# Tabla comparativa
+tabla_rf_est_comp <- data.frame(
+  ntree        = sapply(resultados_rf_est, `[[`, "ntree"),
+  mtry         = sapply(resultados_rf_est, `[[`, "mtry"),
+  Accuracy     = round(sapply(resultados_rf_est, `[[`, "accuracy"), 3),
+  Balanced_Acc = round(sapply(resultados_rf_est, `[[`, "BA"), 3),
+  TPR_Sensib   = round(sapply(resultados_rf_est, `[[`, "TPR"), 3),
+  TNR_Especif  = round(sapply(resultados_rf_est, `[[`, "TNR"), 3)
+)
+kable(tabla_rf_est_comp,
+      caption = "Comparación de combinaciones Random Forest — estadio III vs IV",
+      align = c("c","c","c","c","c","c")) %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"), full_width = FALSE) %>%
+  column_spec(1:2, bold = TRUE) %>%
+  row_spec(0, bold = TRUE, background = "#2C3E50", color = "white")
+
+# Mejor combinación
+best_rf_est_idx <- which.max(sapply(resultados_rf_est, `[[`, "BA"))
+best_rf_est     <- resultados_rf_est[[best_rf_est_idx]]
+
+cat("Random Forest Estadio — Mejor combinación\n")
+cat("ntree =", best_rf_est$ntree, "| mtry =", best_rf_est$mtry,
+    "| nodesize =", nodesize_rf_est, "\n")
+cat("Balanced Accuracy:", round(best_rf_est$BA,  3),
+    "| TPR:", round(best_rf_est$TPR, 3),
+    "| TNR:", round(best_rf_est$TNR, 3), "\n")
+
+# Tabla comparativa final
+pred_rf_est     <- best_rf_est$pred
+probs_rf_est    <- best_rf_est$probs
+obs_rf_est      <- as.character(df_rf_est_original$estadio_bin)
+accuracy_rf_est <- best_rf_est$accuracy
+BA_rf_est       <- best_rf_est$BA
+TPR_rf_est      <- best_rf_est$TPR
+TNR_rf_est      <- best_rf_est$TNR
+
+auc_rf_est <- tryCatch(
+  pROC::roc(df_rf_est_original$estadio_bin, probs_rf_est,
+            quiet = TRUE, levels = c("III","IV"), direction = "<"),
+  error = function(e) NULL)
+auc_rf_est_val <- if (!is.null(auc_rf_est)) round(as.numeric(auc_rf_est$auc), 3) else NA
+
+# Matriz de confusión
+as.data.frame.matrix(best_rf_est$cm) %>%
+  tibble::rownames_to_column("Observado") %>%
+  kable(caption = "Matriz de confusión LOOCV — Random Forest estadio (mejor combinación)",
+        align = "c") %>%
+  kable_styling(bootstrap_options = c("striped","condensed"), full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#2C3E50", color = "white")
+
+# Curva ROC
+if (!is.null(auc_rf_est))
+  plot(auc_rf_est, main = paste0("Curva ROC — Random Forest para el estadio tumoral | AUC = ", auc_rf_est_val))
+
+# Tabla métricas
+data.frame(
+  Métrica = c("Accuracy","Balanced Accuracy","Sensibilidad","Especificidad","AUC"),
+  Valor   = c(accuracy_rf_est, BA_rf_est, TPR_rf_est, TNR_rf_est, auc_rf_est_val)
+) %>%
+  kable(caption = "Rendimiento LOOCV — Random Forest (estadio III vs IV)",
+        align = c("l","c")) %>%
+  kable_styling(bootstrap_options = c("striped","condensed"), full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#2C3E50", color = "white") %>%
+  row_spec(2, bold = TRUE, background = "#D6EAF8")
+```
+
+### Importancia de variables
+
+```{r rf-importancia-estadio}
+if (length(unique(df_rf_est_rose$estadio_bin)) >= 2) {
+  mt_safe_est_full   <- min(best_rf_est$mtry, ncol(df_rf_est_rose) - 1)
+  modelo_rf_est_full <- randomForest(estadio_bin ~ ., data = df_rf_est_rose,
+                                      ntree     = best_rf_est$ntree,
+                                      mtry      = mt_safe_est_full,
+                                      nodesize  = nodesize_rf_est,
+                                      importance = TRUE)
+  imp_est_df <- data.frame(
+    Variable         = rownames(importance(modelo_rf_est_full)),
+    MeanDecreaseGini = round(importance(modelo_rf_est_full)[,"MeanDecreaseGini"], 3)
+  ) %>% arrange(desc(MeanDecreaseGini))
+
+  cat("\nImportancia de variables:\n")
+  print(imp_est_df, row.names = FALSE)
+
+  varImpPlot(modelo_rf_est_full,
+             main = paste0("Importancia de variables Random Forest para el estadio tumoral"))
+}
+```
+
+***
